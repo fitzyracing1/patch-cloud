@@ -27,3 +27,7 @@ tarballs/next-*.tgz
 # fork checkouts / PR diffs (fork sources live on GitHub under fitzyracing1/*@patch-cloud)
 forks-src/
 prdiffs/
+
+# npm-scoped build output (regenerate with npm-scoped/prepare.mjs)
+npm-scoped/stage/
+npm-scoped/dist/

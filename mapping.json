@@ -8,12 +8,14 @@
     "upstreamDir": "upstream/broken-demo",
     "upstreamFallback": true,
     "rewriteReady": true,
+    "note": "Fully working local demo: dark → fork, lit → upstream",
     "publicNote": "Demo package: light dark → fork, light lit → upstream."
   },
   "react/react": {
     "npmName": "react",
     "upstreamFallback": true,
     "rewriteReady": true,
+    "note": "Fork fitzyracing1/react (main) created 2026-10-11; no code changes yet. Dark → annotated upstream react@19.3.0 tarball (PATCH-CLOUD.md + package.json#_patchCloud). Lit → proxy registry.npmjs.org. Runtime identical to upstream.",
     "forkRepo": "fitzyracing1/react",
     "forkBranch": "main",
     "version": "19.3.0",
@@ -25,6 +27,7 @@
     "npmName": "next",
     "upstreamFallback": true,
     "rewriteReady": true,
+    "note": "CI-only fork (rspack test manifests). Dark → annotated upstream next@16.4.0 tarball (PATCH-CLOUD.md + package.json#_patchCloud). Lit → proxy registry.npmjs.org. Runtime identical to upstream.",
     "ciPatch": {
       "kind": "npm package (CI test-manifest patch; annotated upstream tarball)",
       "state": "posted, waiting on maintainers",
@@ -32,6 +35,14 @@
       "upstreamRun": "https://github.com/vercel/next.js/actions/runs/38094923448",
       "upstreamRef": "canary d8c1c1b0002d (v16.5.0-canary.8)",
       "summary": "Rspack test manifests: 163 failing React 18.3.1 cases marked failed + 2 flakey (bot from #94835 would normally do this).",
+      "patchFiles": [
+        "/workspace/ci-fixes/next.js-rspack-manifest.patch"
+      ],
+      "writeup": "/workspace/ci-fixes/next-analysis/NOTES.md",
+      "drafts": [],
+      "validation": "JSON+prettier OK; git apply --check OK; get-test-filter excludes all 163 failing (canary.8 & canary.7), 0 passing wrongly excluded; all files exist",
+      "tarball": "tarballs/next-16.4.0-fork.tgz (repacked upstream + PATCH-CLOUD.md; no monorepo rebuild)",
+      "notPushed": false,
       "upstreamUrl": "https://github.com/vercel/next.js/pull/100001",
       "postedAt": "2026-10-11T23:08:00-04:00",
       "postedAs": "PR #100001"
@@ -48,6 +59,7 @@
     "npmName": null,
     "upstreamFallback": false,
     "rewriteReady": false,
+    "note": "Deno is a binary/runtime, not an npm install target. CI patch lives at /workspace/ci-fixes/deno.",
     "ciPatch": {
       "kind": "CI patch",
       "state": "issue filed; skip + cleanup PRs opened",
@@ -55,6 +67,16 @@
       "upstreamRun": "https://github.com/denoland/deno/actions/runs/37514460953",
       "upstreamRef": "main a18ce33715 (still HEAD)",
       "summary": "macOS skips for 2 flaky http2 node_compat tests (#36141 regressed) + config cleanup of 3 nested duplicate entries under parallel/test-fs-rm.js.",
+      "patchFiles": [
+        "/workspace/ci-fixes/deno-disable-flaky-http2-macos.patch",
+        "/workspace/ci-fixes/deno-config-cleanup.patch"
+      ],
+      "writeup": null,
+      "drafts": [
+        "/workspace/ci-fixes/deno-issue-draft.md"
+      ],
+      "validation": "ajv vs tests/node_compat/schema.json: INVALID before, VALID after cleanup (alone and combined with skip patch); both patches apply in either order",
+      "notPushed": false,
       "upstreamUrl": "https://github.com/denoland/deno/issues/37009",
       "prsOpened": true,
       "postedAt": "2026-10-11T23:08:00-04:00",
@@ -70,6 +92,7 @@
   "nodejs/node": {
     "npmName": null,
     "rewriteReady": false,
+    "note": "Not an npm package to replace via registry rewrite. CI patch (release-proposal fix write-up) listed under ciPatch.",
     "ciPatch": {
       "kind": "CI patch",
       "state": "posted, waiting on maintainers",
@@ -77,6 +100,15 @@
       "upstreamRun": "https://github.com/nodejs/node/actions/runs/38180315692",
       "upstreamRef": "v24.22.0-proposal (PR #66667) @ a5d0eb95dd",
       "summary": "Release-proposal linter: commit 66eafad642 (PR #65510, dont-land-on-v24.x) must be dropped from v24.x-staging by the releaser. Full scan: #65510 is the only violation.",
+      "patchFiles": [
+        "/workspace/ci-fixes/node/FIX.md"
+      ],
+      "writeup": "/workspace/ci-fixes/node/FIX.md",
+      "drafts": [
+        "/workspace/ci-fixes/node/comment-draft-pr66667.md"
+      ],
+      "validation": "Local sim (branch sim-fix in /workspace/ci-fixes/node/repo): rebase clean; changelog linter exit 0; 0 label violations",
+      "notPushed": false,
       "upstreamUrl": "https://github.com/nodejs/node/pull/66667#issuecomment-6114930332",
       "postedAt": "2026-10-11T23:08:00-04:00",
       "postedAs": "comment on PR #66667"

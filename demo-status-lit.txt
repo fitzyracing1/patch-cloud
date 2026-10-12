@@ -1,0 +1,17 @@
+=== patch-cloud /status (lit light) ===
+Time: Oct 11, 2026 6:47 PM ET
+{
+  "repo": "local/broken-demo",
+  "npmName": "broken-demo",
+  "lit": true,
+  "conclusion": "success",
+  "lightSource": "local-override",
+  "rewriteReady": true,
+  "rewriteActive": false,
+  "forkPath": "/workspace/patch-cloud/forks/broken-demo",
+  "forkTarball": "/workspace/patch-cloud/tarballs/broken-demo-1.0.0-fork.tgz",
+  "upstreamTarball": "/workspace/patch-cloud/tarballs/broken-demo-1.0.0-upstream.tgz",
+  "note": "Fully working local demo: dark \u2192 fork, lit \u2192 upstream",
+  "wouldRewrite": null
+}
+

@@ -1,7 +1,7 @@
 #!/usr/bin/env bash
 # Run AFTER `railway whoami` succeeds. Deploys patch-cloud from local files (no GitHub push).
 set -euo pipefail
-cd "$(dirname "$0")"
+cd /workspace/patch-cloud
 railway whoami
 railway init --name patch-cloud
 railway up --detach --service patch-cloud 2>/dev/null || railway up --detach   # first up creates the service

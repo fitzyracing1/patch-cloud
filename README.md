@@ -16,6 +16,17 @@ Not committed here: the ~44 MB annotated `next` tarball (rebuild with `npm run p
 
 Nothing is published to the public npm registry by this project. Fork / annotated tarballs live under `tarballs/`.
 
+## Dark lights board (`/status`)
+
+`/status` in a browser is a public **dark lights board**:
+- **Dark now:** tracked packages whose upstream build is red, with days dark (from the first red run after the last passing one; "≥" when no passing run is in the 30 runs checked), whether a patch-cloud fork is served, and the one-line opt-in install when it is.
+- **Watchlist:** popular packages with dark CI from the npmmirror scan (`watchlist.json`, built by `node build-watchlist.mjs` from `/workspace/mirror/dig.json` + `notes.json`), with repo link, red run, why the build is red, fixability, and "no patch-cloud fork yet". It's a snapshot with day counts as of the scan; it isn't refreshed live.
+- **All tracked lights:** the full table as before.
+
+JSON (`/status?format=json`) adds `packages[].dark`, `packages[].install`, `packages[].npmWeeklyDownloads`, and a top-level `watchlist`. "Dark" always means the upstream CI didn't pass. Installs from npm still work.
+
+`node seed-lights.mjs` refreshes the bundled `lights.json` (with `darkSince`) before a deploy.
+
 ## Idea
 
 1. The light computer fetches CI status for public repos into `lights.json` (● lit = upstream build passing, ○ dark = upstream build failing; active-low). The registry tracks the light computer's 8 repos **plus every GitHub repo in `mapping.json`**, refreshed live.

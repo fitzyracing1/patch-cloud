@@ -47,6 +47,7 @@ import { gunzipSync } from 'node:zlib';
 const LOCAL_LIGHTS = join(ROOT, 'local-lights.json');
 const MAPPING_FILE = join(ROOT, 'mapping.json');
 const UPSTREAM_STATUS_FILE = join(ROOT, 'upstream-status.json');
+const WATCHLIST_FILE = join(ROOT, 'watchlist.json');
 const UPSTREAM = 'https://registry.npmjs.org';
 const UA = 'patch-cloud/0.2 (+https://github.com/fitzyracing1)';
 
@@ -104,8 +105,26 @@ function mergeLights(ghArr) {
   return byRepo;
 }
 
+/**
+ * How long the light has read dark: walk the newest push runs (newest first) while they
+ * are not "success"; the oldest of that streak is when the light went dark. If the page
+ * ends before a passing run, the streak is capped (dark at least that long).
+ */
+function darkStreakOf(runs) {
+  if (!runs.length || runs[0].conclusion === 'success') return {};
+  let i = 0;
+  while (i < runs.length && runs[i].conclusion !== 'success') i += 1;
+  const first = runs[i - 1];
+  return {
+    darkSince: first.run_started_at || first.created_at || first.updated_at,
+    darkRuns: i,
+    darkSinceCapped: i === runs.length,
+    lastPassingAt: i < runs.length ? runs[i].updated_at : null,
+  };
+}
+
 async function fetchOneLight(repo) {
-  const url = `https://api.github.com/repos/${repo}/actions/runs?per_page=1&status=completed&event=push`;
+  const url = `https://api.github.com/repos/${repo}/actions/runs?per_page=30&status=completed&event=push`;
   const headers = {
     Accept: 'application/vnd.github+json',
     'User-Agent': UA,
@@ -118,7 +137,8 @@ async function fetchOneLight(repo) {
     throw new Error(`${repo}: HTTP ${res.status}`);
   }
   const data = await res.json();
-  const run = data.workflow_runs && data.workflow_runs[0];
+  const runs = data.workflow_runs || [];
+  const run = runs[0];
   if (!run) throw new Error(`${repo}: no completed runs`);
   return {
     repo,
@@ -127,6 +147,7 @@ async function fetchOneLight(repo) {
     url: run.html_url,
     lit: run.conclusion === 'success',
     runAt: run.updated_at,
+    ...darkStreakOf(runs),
     fetchedAt: new Date().toISOString(),
   };
 }
@@ -721,6 +742,122 @@ function displayFor(m, light, rewrite) {
   return { label, tone, secondary, secondaryUrl: ciUrl };
 }
 
+// --- dark lights board helpers ----------------------------------------------
+const DAY_MS = 86_400_000;
+const daysSince = (iso, now = Date.now()) => {
+  const t = Date.parse(iso || '');
+  return Number.isFinite(t) ? Math.max(0, Math.floor((now - t) / DAY_MS)) : null;
+};
+
+/** How long a mapped light has been dark (null when lit/unknown). */
+function darkInfo(light) {
+  if (!light || light.lit !== false) return null;
+  const since = light.darkSince || light.runAt || null;
+  const atLeast = !light.darkSince || !!light.darkSinceCapped;
+  const days = daysSince(since);
+  return {
+    since,
+    days,
+    atLeast,
+    label: days == null ? 'dark (since unknown)' : `${atLeast ? '≥ ' : ''}${days} day${days === 1 ? '' : 's'} dark`,
+    lastPassingAt: light.lastPassingAt || null,
+  };
+}
+
+// npm weekly downloads (public api.npmjs.org), cached; only used for ranking/labels.
+const NPM_DL_CACHE_MS = 12 * 60 * 60 * 1000;
+let npmWeekly = { at: 0, byName: {}, loading: null };
+async function refreshNpmWeekly(names) {
+  const unscoped = [...new Set(names.filter((n) => n && !n.startsWith('@')))].slice(0, 120);
+  const scoped = [...new Set(names.filter((n) => n && n.startsWith('@')))].slice(0, 10);
+  const byName = { ...npmWeekly.byName };
+  const get = async (q) => {
+    const r = await fetch(`https://api.npmjs.org/downloads/point/last-week/${q}`, { headers: { 'User-Agent': UA } });
+    return r.ok ? r.json() : null;
+  };
+  if (unscoped.length) {
+    const j = await get(unscoped.join(','));
+    if (j && unscoped.length === 1 && j.package) byName[j.package] = j.downloads;
+    else if (j) for (const [k, v] of Object.entries(j)) if (v && typeof v.downloads === 'number') byName[k] = v.downloads;
+  }
+  await Promise.allSettled(scoped.map(async (n) => {
+    const j = await get(encodeURIComponent(n).replace('%40', '@'));
+    if (j && typeof j.downloads === 'number') byName[n] = j.downloads;
+  }));
+  npmWeekly = { at: Date.now(), byName, loading: null };
+}
+/** Fire-and-forget refresh; /status never waits more than ~2.5s for it. */
+async function ensureNpmWeekly() {
+  if (Date.now() - npmWeekly.at < NPM_DL_CACHE_MS) return;
+  if (!npmWeekly.loading) {
+    const names = [
+      ...Object.values(loadMapping()).map((m) => m.npmName).filter((n) => n && n !== 'broken-demo'),
+      ...((loadJson(WATCHLIST_FILE, {})?.entries) || []).map((e) => e.packages?.[0]?.name),
+    ];
+    npmWeekly.loading = refreshNpmWeekly(names).catch((e) => {
+      npmWeekly.loading = null;
+      npmWeekly.at = Date.now() - NPM_DL_CACHE_MS + 10 * 60 * 1000; // retry in 10 min
+      console.warn('npm weekly downloads refresh failed:', e.message || e);
+    });
+  }
+  await Promise.race([npmWeekly.loading, new Promise((r) => setTimeout(r, 2500))]);
+}
+const weeklyFor = (name) => (name && typeof npmWeekly.byName[name] === 'number' ? npmWeekly.byName[name] : null);
+
+/** Popular packages with dark CI from the mirror scan, public-safe (no fork yet unless mapped). */
+function watchlistPublic() {
+  const w = loadJson(WATCHLIST_FILE, null);
+  if (!w || !Array.isArray(w.entries)) return null;
+  const mapping = loadMapping();
+  const clean = (s) => (s ? publicText(String(s).replace(/\bfailures\b/gi, 'failing runs').replace(/\bfailure\b/gi, 'failing run')) : null);
+  const entries = w.entries.map((e) => {
+    const mapped = mapping[e.repo];
+    const top = e.packages?.[0]?.name || null;
+    const scanAt = Date.parse(w.generatedAt || '') || Date.now();
+    const latestDays = daysSince(e.ci?.latestRunAt, scanAt);
+    const passDays = daysSince(e.ci?.lastPassingAt, scanAt);
+    return {
+      rank: e.rank,
+      repo: e.repo,
+      repoUrl: /^https:\/\/github\.com\//.test(e.repoUrl || '') ? e.repoUrl : `https://github.com/${e.repo}`,
+      packages: (e.packages || []).map((p) => ({ name: p.name, mirrorDownloadsSep2026: p.mirrorDownloadsSep2026 ?? null })),
+      npmWeeklyDownloads: weeklyFor(top),
+      archived: !!e.archived,
+      ci: {
+        workflow: e.ci?.workflow || null,
+        url: /^https:\/\/github\.com\//.test(e.ci?.url || '') ? e.ci.url : null,
+        latestRunAt: e.ci?.latestRunAt || null,
+        redRunsInARow: e.ci?.redRunsInARow ?? null,
+        redRunsCapped: !!e.ci?.redRunsCapped,
+        lastPassingAt: e.ci?.lastPassingAt || null,
+      },
+      dark: (() => {
+        const exact = e.ci?.redRunsInARow === 1 && !e.ci?.redRunsCapped && latestDays != null;
+        const d = (n) => `${n} day${n === 1 ? '' : 's'}`;
+        let label;
+        if (latestDays == null) label = 'dark (since unknown)';
+        else if (exact) label = `${d(latestDays)} dark`;
+        else if (passDays != null) label = passDays === latestDays ? `${d(latestDays)} dark` : `${latestDays}–${d(passDays)} dark`;
+        else label = `≥ ${d(latestDays)} dark · no passing run in scan window`;
+        return { daysAtLeast: latestDays, lastPassingDaysAgo: passDays, exact, label };
+      })(),
+      summary: clean(e.summary),
+      fixability: clean(e.fixability),
+      existingFix: clean(e.existingFix),
+      fork: mapped && mapped.rewriteReady ? 'patch-cloud fork available' : 'no patch-cloud fork yet',
+    };
+  });
+  return {
+    scannedAt: w.generatedAt || null,
+    source: clean(w.source),
+    downloadsNote: clean(w.downloadsNote),
+    darkDefinition: clean(w.darkDefinition),
+    totalDarkRepos: w.totalDarkRepos ?? entries.length,
+    note: 'Snapshot from a one-off scan; these lights are not refreshed live and day counts are as of the scan date. A dark light means the latest upstream build did not pass — npm installs of these packages still work.',
+    entries,
+  };
+}
+
 function rewriteStateFor(m, light) {
   const lit = light ? !!light.lit : null;
   const dark = lit === false;
@@ -761,6 +898,12 @@ function publicStatusPayload() {
       upstream: upstreamPublic(m, ups[repo]),
       note: publicNote(m),
       downloads: m.npmName ? downloadsFor(m.npmName) : null,
+      dark: darkInfo(light),
+      npmWeeklyDownloads: m.npmName ? weeklyFor(m.npmName) : null,
+      install:
+        m.npmName && (rewrite === 'active' || rewrite === 'manual')
+          ? `npm install ${m.npmName}${m.version ? `@${m.version}` : ''} --registry ${reg}`
+          : null,
     });
   }
   const count = (f) => packages.filter(f).length;
@@ -781,6 +924,7 @@ function publicStatusPayload() {
     },
     downloads: downloadsSummary(),
     packages,
+    watchlist: watchlistPublic(),
     legend: {
       lit: 'Upstream OK — normal npm (CI passing → proxied / upstream)',
       dark: 'Upstream build failing → fork served when one is packaged',
@@ -1061,7 +1205,7 @@ function htmlLanding(status) {
     <span class="pill">${active.length} rewrite active</span>
     <span class="pill">${manual.length} manual: fix available</span>
     <span class="pill">${ready.length} forks packaged</span>
-    <a href="/status">/status</a> ·
+    <a href="/status">dark lights board</a> ·
     <a href="/health">/health</a>
   </p>
   <table>
@@ -1194,21 +1338,84 @@ function htmlStatusPublic(status) {
       </tr>`;
     })
     .join('\n');
-  return `<!doctype html><html lang="en"><head><meta charset="utf-8"><title>patch-cloud status</title>
+  const fmtN = (n) => (n == null ? null : n >= 1e6 ? `${(n / 1e6).toFixed(1)}M` : n >= 1e3 ? `${Math.round(n / 1e3)}K` : String(n));
+  const codeify = (t) => escapeHtml(t || '').replace(/`([^`]+)`/g, '<code>$1</code>');
+  const darkNow = status.packages
+    .filter((p) => p.npmName && p.npmName !== 'broken-demo' && p.light.state === 'dark')
+    .sort((x, y) => (y.npmWeeklyDownloads || 0) - (x.npmWeeklyDownloads || 0) || (y.dark?.days || 0) - (x.dark?.days || 0));
+  const boardRows = darkNow
+    .map((p) => {
+      const forkCell =
+        p.rewrite === 'active'
+          ? `<b style="color:#3fb950">yes — served now</b>${p.fork ? `<br><small>${link(p.fork.branchUrl || p.fork.url, p.fork.repo + (p.fork.branch ? '@' + p.fork.branch : ''))}</small>` : ''}`
+          : `<span style="color:#d29922">no fork yet</span>`;
+      const install = p.install ? `<pre class="one">${escapeHtml(p.install)}</pre>` : '<small>— (normal npm; nothing rewritten)</small>';
+      const days = p.dark
+        ? `<b>${escapeHtml(p.dark.label)}</b>${p.dark.since ? `<br><small>since ${escapeHtml(p.dark.since.slice(0, 10))}${p.dark.lastPassingAt ? ` · last passing ${escapeHtml(p.dark.lastPassingAt.slice(0, 10))}` : ''}</small>` : ''}`
+        : '—';
+      const ci = p.light.url ? link(p.light.url, `upstream build: ${p.light.ci}`) : escapeHtml(`upstream build: ${p.light.ci}`);
+      return `<tr>
+        <td><code>${escapeHtml(p.npmName)}</code>${p.npmWeeklyDownloads != null ? `<br><small>${fmtN(p.npmWeeklyDownloads)}/week on npm</small>` : ''}<br><small>${link(`https://github.com/${p.repo}`, p.repo)}</small></td>
+        <td>${days}<br><small>${ci}</small></td>
+        <td>${forkCell}</td>
+        <td>${install}</td>
+      </tr>`;
+    })
+    .join('\n');
+  const wl = status.watchlist;
+  const wlRow = (e) => {
+    const pk = e.packages
+      .slice(0, 3)
+      .map((x) => `<code>${escapeHtml(x.name)}</code>${x.mirrorDownloadsSep2026 != null ? ` <small>${fmtN(x.mirrorDownloadsSep2026)}</small>` : ''}`)
+      .join('<br>');
+    const more = e.packages.length > 3 ? `<br><small>+${e.packages.length - 3} more</small>` : '';
+    return `<tr>
+        <td>${e.rank}</td>
+        <td>${pk}${more}${e.npmWeeklyDownloads != null ? `<br><small>${fmtN(e.npmWeeklyDownloads)}/week on npm</small>` : ''}</td>
+        <td>${link(e.repoUrl, e.repo)}${e.archived ? ' <small>(archived)</small>' : ''}<br><small>${e.ci.url ? link(e.ci.url, `${e.ci.workflow || 'CI'} run`) : ''}</small></td>
+        <td><b>${escapeHtml(e.dark.label)}</b><br><small>${e.ci.lastPassingAt ? `last passing ${escapeHtml(e.ci.lastPassingAt.slice(0, 10))}<br>` : ''}${e.ci.redRunsInARow != null ? `${e.ci.redRunsInARow}${e.ci.redRunsCapped ? '+' : ''} red run${e.ci.redRunsInARow === 1 ? '' : 's'} in a row` : ''}</small></td>
+        <td><small>${codeify(e.summary)}</small></td>
+        <td><small>${codeify(e.fixability)}${e.existingFix ? `<br>existing fix: ${codeify(e.existingFix)}` : ''}</small></td>
+        <td><small style="color:#d29922">${escapeHtml(e.fork)}</small></td>
+      </tr>`;
+  };
+  const wlHtml = wl
+    ? `<h2 id="watchlist">Watchlist — popular packages with dark CI (${wl.entries.length} of ${escapeHtml(wl.totalDarkRepos)} dark repos)</h2>
+  <p class="muted">${escapeHtml(wl.note)} Scan: ${escapeHtml((wl.scannedAt || '').slice(0, 10))}. ${escapeHtml(wl.darkDefinition || '')}. Numbers next to package names are ${escapeHtml(wl.downloadsNote || '')}.</p>
+  <table>
+    <tr><th>#</th><th>package(s)</th><th>repo / red run</th><th>dark</th><th>why the build is red</th><th>fixability</th><th>patch-cloud</th></tr>
+    ${wl.entries.map(wlRow).join('\n')}
+  </table>`
+    : '';
+  return `<!doctype html><html lang="en"><head><meta charset="utf-8"><title>patch-cloud — dark lights board</title>
   <meta name="viewport" content="width=device-width,initial-scale=1">
   <style>
-    body{font-family:system-ui,sans-serif;margin:2rem;background:#111;color:#eee}
+    body{font-family:system-ui,sans-serif;margin:2rem;background:#111;color:#eee;line-height:1.45}
     table{border-collapse:collapse;width:100%;font-size:.9rem} th,td{border:1px solid #444;padding:.5rem;text-align:left;vertical-align:top}
     th{background:#222} a{color:#6af} code{color:#9f9}
+    h2{margin-top:2.2rem;border-bottom:1px solid #333;padding-bottom:.3rem}
+    .muted{color:#aaa;font-size:.9rem}
+    pre.one{margin:0;background:#1a1a1a;border:1px solid #333;border-radius:6px;padding:.35rem .5rem;white-space:pre-wrap;word-break:break-all;font-size:.8rem}
     .pill{display:inline-block;padding:.15rem .55rem;border-radius:999px;background:#222;font-size:.8rem;margin-right:.3rem}
   </style></head><body>
-  <h1>patch-cloud status</h1>
+  <h1>patch-cloud — dark lights board</h1>
+  <p class="muted">A light is <b>dark</b> when the upstream project's latest CI build did not pass, and <b>lit</b> when it passed. A dark light is about the project's own tests, not your install: packages still download normally from npm. Where a fixed fork is packaged, patch-cloud can serve it under the same name if you opt in.</p>
   <p>Registry: <code>${escapeHtml(status.registry)}</code>
-  · <a href="/">landing</a> · <a href="/status?format=json">JSON</a> · <a href="/health">/health</a></p>
+  · <a href="/">landing</a> · <a href="/status?format=json">JSON</a> · <a href="/health">/health</a>${wl ? ' · <a href="#watchlist">watchlist</a>' : ''} · <a href="#all">all tracked lights</a></p>
   <p><span class="pill">${status.counts.rewriteActive} fork available (upstream build failing)</span>
   <span class="pill">${status.counts.manual} fork available (manual: fix waiting upstream)</span>
   <span class="pill">${status.counts.ready} fork packaged, upstream OK</span>
-  <span class="pill">${status.counts.wouldRewrite} upstream failing, no fork yet</span></p>
+  <span class="pill">${status.counts.wouldRewrite} upstream failing, no fork yet</span>${wl ? `<span class="pill">${wl.entries.length} on watchlist</span>` : ''}</p>
+
+  <h2>Dark now — tracked packages</h2>
+  <p class="muted">Live lights (cached ${escapeHtml(status.lightsCacheMinutes)} min). "Days dark" counts from the first red run after the last passing one; "≥" means no passing run was in the window checked.</p>
+  <table>
+    <tr><th>package</th><th>dark for</th><th>patch-cloud fork</th><th>one-line install (opt-in)</th></tr>
+    ${boardRows || '<tr><td colspan="4">No tracked package is dark right now.</td></tr>'}
+  </table>
+  ${wlHtml}
+
+  <h2 id="all">All tracked lights</h2>
   ${downloadsLine(status.downloads)}
   <table>
     <tr><th>Light repo</th><th>npm name</th><th>Status</th><th>Rewrite</th><th>Downloads</th><th>Fork</th><th>Upstream</th><th>Note</th></tr>
@@ -1305,6 +1512,11 @@ const server = http.createServer(async (req, res) => {
       await ensureUpstream();
     } catch (e) {
       console.error('upstream state refresh failed (serving cached):', e.message || e);
+    }
+    try {
+      await ensureNpmWeekly();
+    } catch {
+      /* ignore */
     }
     const status = STATUS_VERBOSE ? statusPayloadVerbose() : publicStatusPayload();
     const accept = req.headers.accept || '';
@@ -1472,4 +1684,7 @@ export {
   tarballManifest,
   rewriteMode,
   displayFor,
+  darkStreakOf,
+  fetchOneLight,
+  watchlistPublic,
 };

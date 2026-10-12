@@ -1,0 +1,593 @@
+{
+  "generatedAt": "2026-10-12T03:04:39.258Z",
+  "source": "npmmirror dark-CI scan (top npm + China-popular packages, 573 checked, 496 repos)",
+  "downloadsNote": "npmmirror (China mirror) downloads for September 2026; the /week figure is npmjs.org",
+  "darkDefinition": "dark = the latest push/schedule test-CI run on the default branch did not pass",
+  "scanned": {
+    "packages": 573,
+    "repos": 496
+  },
+  "totalDarkRepos": 33,
+  "entries": [
+    {
+      "rank": 1,
+      "repo": "isaacs/node-lru-cache",
+      "repoUrl": "https://github.com/isaacs/node-lru-cache",
+      "packages": [
+        {
+          "name": "lru-cache",
+          "mirrorDownloadsSep2026": 29072134
+        }
+      ],
+      "archived": false,
+      "ci": {
+        "workflow": "CI",
+        "event": "push",
+        "url": "https://github.com/isaacs/node-lru-cache/actions/runs/35406875832",
+        "latestRunAt": "2026-09-18T23:44:53Z",
+        "redRunsInARow": 8,
+        "redRunsCapped": false,
+        "lastPassingAt": "2026-04-20T16:02:39Z"
+      },
+      "summary": "Windows-only (4/8 jobs): `tap` aborts with \"'@tapjs/clock' does not appear to be a tap plugin… Cannot find module '@tapjs/clock'\". `.taprc` lists the plugin but it is in neither devDependencies nor package-lock. Failing 8 pushes in a row since 2026-04-20.",
+      "fixability": "easy (add @tapjs/clock devDep; verify on Windows)",
+      "existingFix": "none (2 unrelated open PRs #410/#411)",
+      "fork": false,
+      "openPRCount": 2
+    },
+    {
+      "rank": 2,
+      "repo": "DefinitelyTyped/DefinitelyTyped",
+      "repoUrl": "https://github.com/DefinitelyTyped/DefinitelyTyped",
+      "packages": [
+        {
+          "name": "@types/node",
+          "mirrorDownloadsSep2026": 26876315
+        },
+        {
+          "name": "@types/estree",
+          "mirrorDownloadsSep2026": 9777480
+        },
+        {
+          "name": "@types/react-dom",
+          "mirrorDownloadsSep2026": 7152630
+        },
+        {
+          "name": "@types/json-schema",
+          "mirrorDownloadsSep2026": 5781592
+        },
+        {
+          "name": "@types/yargs",
+          "mirrorDownloadsSep2026": 4714706
+        },
+        {
+          "name": "@types/three",
+          "mirrorDownloadsSep2026": 806056
+        }
+      ],
+      "archived": false,
+      "ci": {
+        "workflow": "CI",
+        "event": "schedule",
+        "url": "https://github.com/DefinitelyTyped/DefinitelyTyped/actions/runs/38138657366",
+        "latestRunAt": "2026-10-11T12:16:45Z",
+        "redRunsInARow": 1,
+        "redRunsCapped": false,
+        "lastPassingAt": "2026-10-11T10:01:20Z"
+      },
+      "summary": "Scheduled full `test-all` (8/16 shards) failed on dtslint errors in individual packages (e.g. falcor-router). Pushes before and after are green. One-off breakage in a huge monorepo.",
+      "fixability": "hard / transient (not an outsider target)",
+      "existingFix": "n/a",
+      "fork": false,
+      "openPRCount": 100
+    },
+    {
+      "rank": 3,
+      "repo": "sindresorhus/has-flag",
+      "repoUrl": "https://github.com/sindresorhus/has-flag",
+      "packages": [
+        {
+          "name": "has-flag",
+          "mirrorDownloadsSep2026": 20098030
+        }
+      ],
+      "archived": false,
+      "ci": {
+        "workflow": "CI",
+        "event": "push",
+        "url": "https://github.com/sindresorhus/has-flag/actions/runs/35384164371",
+        "latestRunAt": "2026-09-18T19:07:33Z",
+        "redRunsInARow": 1,
+        "redRunsCapped": true,
+        "lastPassingAt": null
+      },
+      "summary": "`tsd@0.14` (old bundled TypeScript) chokes on the latest transitive `@types/node` (`✖ 952:8 Required type parameters may not follow optional…`, `Cannot find name Http1Request`). CI matrix still Node 12/14 and actions@v2. Triggered by the 2026-09-18 \"Meta tweaks\" mass push.",
+      "fixability": "easy technically (pin @types/node or bump tsd + matrix), low merge odds (sindresorhus legacy major)",
+      "existingFix": "none (0 open PRs)",
+      "fork": false,
+      "openPRCount": 0
+    },
+    {
+      "rank": 4,
+      "repo": "tapjs/signal-exit",
+      "repoUrl": "https://github.com/tapjs/signal-exit",
+      "packages": [
+        {
+          "name": "signal-exit",
+          "mirrorDownloadsSep2026": 19348607
+        }
+      ],
+      "archived": false,
+      "ci": {
+        "workflow": "CI",
+        "event": "push",
+        "url": "https://github.com/tapjs/signal-exit/actions/runs/18807452684",
+        "latestRunAt": "2025-10-25T19:21:41Z",
+        "redRunsInARow": 1,
+        "redRunsCapped": true,
+        "lastPassingAt": null
+      },
+      "summary": "All 4 Node 18.x jobs failed (Linux/macOS/Windows) on the only push run (2025-10-25 \"BlueOak-1.0.0\"). Logs expired (HTTP 410); probably a devDep that no longer supports Node 18 (unconfirmed).",
+      "fixability": "easy-medium (drop/bump 18.x in matrix; needs a local repro first)",
+      "existingFix": "none (#86/#88 are feature fixes)",
+      "fork": false,
+      "openPRCount": 4
+    },
+    {
+      "rank": 5,
+      "repo": "sindresorhus/escape-string-regexp",
+      "repoUrl": "https://github.com/sindresorhus/escape-string-regexp",
+      "packages": [
+        {
+          "name": "escape-string-regexp",
+          "mirrorDownloadsSep2026": 17194559
+        }
+      ],
+      "archived": false,
+      "ci": {
+        "workflow": "CI",
+        "event": "push",
+        "url": "https://github.com/sindresorhus/escape-string-regexp/actions/runs/35383978815",
+        "latestRunAt": "2026-09-18T19:05:34Z",
+        "redRunsInARow": 1,
+        "redRunsCapped": true,
+        "lastPassingAt": null
+      },
+      "summary": "Same as has-flag: tsd@0.14 vs current @types/node on Node 12/14 after the 2026-09-18 \"Meta tweaks\" push.",
+      "fixability": "easy, low merge odds",
+      "existingFix": "none",
+      "fork": false,
+      "openPRCount": 0
+    },
+    {
+      "rank": 6,
+      "repo": "isaacs/isexe",
+      "repoUrl": "https://github.com/isaacs/isexe",
+      "packages": [
+        {
+          "name": "isexe",
+          "mirrorDownloadsSep2026": 16691373
+        }
+      ],
+      "archived": false,
+      "ci": {
+        "workflow": "CI",
+        "event": "push",
+        "url": "https://github.com/isaacs/isexe/actions/runs/18807223003",
+        "latestRunAt": "2025-10-25T19:01:37Z",
+        "redRunsInARow": 1,
+        "redRunsCapped": true,
+        "lastPassingAt": null
+      },
+      "summary": "Same pattern as signal-exit: all Node 18.x jobs failed on the 2025-10-25 \"BlueOak-1.0.0\" push. Logs expired.",
+      "fixability": "easy-medium (needs repro)",
+      "existingFix": "none",
+      "fork": false,
+      "openPRCount": 5
+    },
+    {
+      "rank": 7,
+      "repo": "sindresorhus/resolve-from",
+      "repoUrl": "https://github.com/sindresorhus/resolve-from",
+      "packages": [
+        {
+          "name": "resolve-from",
+          "mirrorDownloadsSep2026": 16246574
+        }
+      ],
+      "archived": false,
+      "ci": {
+        "workflow": "CI",
+        "event": "push",
+        "url": "https://github.com/sindresorhus/resolve-from/actions/runs/35384834115",
+        "latestRunAt": "2026-09-18T19:14:41Z",
+        "redRunsInARow": 1,
+        "redRunsCapped": true,
+        "lastPassingAt": null
+      },
+      "summary": "Same as has-flag (tsd@0.7 + Node 8–14 matrix vs current @types/node: `Cannot find module node:events`, `esnext.disposable`).",
+      "fixability": "easy, low merge odds",
+      "existingFix": "none",
+      "fork": false,
+      "openPRCount": 0
+    },
+    {
+      "rank": 8,
+      "repo": "isaacs/inherits",
+      "repoUrl": "https://github.com/isaacs/inherits",
+      "packages": [
+        {
+          "name": "inherits",
+          "mirrorDownloadsSep2026": 13940327
+        }
+      ],
+      "archived": false,
+      "ci": {
+        "workflow": "CI",
+        "event": "push",
+        "url": "https://github.com/isaacs/inherits/actions/runs/18807217511",
+        "latestRunAt": "2025-10-25T19:01:05Z",
+        "redRunsInARow": 1,
+        "redRunsCapped": true,
+        "lastPassingAt": null
+      },
+      "summary": "Infra: `Unable to find Node version '12.x' for platform darwin and architecture arm64`. macos-latest is now arm64 and has no Node 12/14 builds.",
+      "fixability": "easy (exclude macOS for 12/14 or use macos-13)",
+      "existingFix": "#49 (2022, token permissions, unrelated)",
+      "fork": false,
+      "openPRCount": 2
+    },
+    {
+      "rank": 9,
+      "repo": "vitejs/vite",
+      "repoUrl": "https://github.com/vitejs/vite",
+      "packages": [
+        {
+          "name": "vite",
+          "mirrorDownloadsSep2026": 11174489
+        }
+      ],
+      "archived": false,
+      "ci": {
+        "workflow": "CI",
+        "event": "push",
+        "url": "https://github.com/vitejs/vite/actions/runs/37959466369",
+        "latestRunAt": "2026-10-09T16:29:17Z",
+        "redRunsInARow": 1,
+        "redRunsCapped": false,
+        "lastPassingAt": "2026-10-09T14:00:23Z"
+      },
+      "summary": "Windows flake: `hmr-ssr.spec.ts > nested dep propagation` timed out / `transport was disconnected`. 1 of 10 jobs; the run before passed.",
+      "fixability": "hard (flaky HMR test; maintainers active)",
+      "existingFix": "n/a",
+      "fork": false,
+      "openPRCount": 100
+    },
+    {
+      "rank": 10,
+      "repo": "sindresorhus/strip-bom",
+      "repoUrl": "https://github.com/sindresorhus/strip-bom",
+      "packages": [
+        {
+          "name": "strip-bom",
+          "mirrorDownloadsSep2026": 10904176
+        }
+      ],
+      "archived": false,
+      "ci": {
+        "workflow": "CI",
+        "event": "push",
+        "url": "https://github.com/sindresorhus/strip-bom/actions/runs/35384969025",
+        "latestRunAt": "2026-09-18T19:16:03Z",
+        "redRunsInARow": 1,
+        "redRunsCapped": true,
+        "lastPassingAt": null
+      },
+      "summary": "Same as has-flag (tsd@0.14 vs current @types/node).",
+      "fixability": "easy, low merge odds",
+      "existingFix": "none",
+      "fork": false,
+      "openPRCount": 0
+    },
+    {
+      "rank": 11,
+      "repo": "jshttp/statuses",
+      "repoUrl": "https://github.com/jshttp/statuses",
+      "packages": [
+        {
+          "name": "statuses",
+          "mirrorDownloadsSep2026": 10671616
+        }
+      ],
+      "archived": false,
+      "ci": {
+        "workflow": "ci",
+        "event": "push",
+        "url": "https://github.com/jshttp/statuses/actions/runs/18132508943",
+        "latestRunAt": "2025-09-30T14:00:58Z",
+        "redRunsInARow": 2,
+        "redRunsCapped": false,
+        "lastPassingAt": "2025-09-16T10:01:05Z"
+      },
+      "summary": "`test (Node.js 22.x/24.x)` jobs exit 2 on the last 2 pushes (Dependabot action bumps). Last green 2025-09-16. Logs expired (410).",
+      "fixability": "medium (needs repro)",
+      "existingFix": "Dependabot #72/#75–#78 stuck since 2025",
+      "fork": false,
+      "openPRCount": 7
+    },
+    {
+      "rank": 12,
+      "repo": "Rich-Harris/magic-string",
+      "repoUrl": "https://github.com/Rich-Harris/magic-string",
+      "packages": [
+        {
+          "name": "magic-string",
+          "mirrorDownloadsSep2026": 9893935
+        }
+      ],
+      "archived": false,
+      "ci": {
+        "workflow": "Test",
+        "event": "push",
+        "url": "https://github.com/Rich-Harris/magic-string/actions/runs/34425110157",
+        "latestRunAt": "2026-09-10T01:21:02Z",
+        "redRunsInARow": 2,
+        "redRunsCapped": false,
+        "lastPassingAt": "2026-09-10T01:16:14Z"
+      },
+      "summary": "Lint: ESLint `style/arrow-parens` error on a JS snippet in README.md:355 (`Unexpected parentheses around single function argument…`). Failing since the v1.3.0 release push (2026-09-10).",
+      "fixability": "easy (1-line README fix or `eslint --fix`)",
+      "existingFix": "none",
+      "fork": false,
+      "openPRCount": 2
+    },
+    {
+      "rank": 13,
+      "repo": "jestjs/jest",
+      "repoUrl": "https://github.com/jestjs/jest",
+      "packages": [
+        {
+          "name": "jest-worker",
+          "mirrorDownloadsSep2026": 9252333
+        },
+        {
+          "name": "pretty-format",
+          "mirrorDownloadsSep2026": 7221347
+        },
+        {
+          "name": "@jest/types",
+          "mirrorDownloadsSep2026": 5308348
+        },
+        {
+          "name": "jest-util",
+          "mirrorDownloadsSep2026": 4231339
+        },
+        {
+          "name": "jest-message-util",
+          "mirrorDownloadsSep2026": 3317859
+        },
+        {
+          "name": "@jest/schemas",
+          "mirrorDownloadsSep2026": 3172426
+        }
+      ],
+      "archived": false,
+      "ci": {
+        "workflow": "Node CI",
+        "event": "push",
+        "url": "https://github.com/jestjs/jest/actions/runs/36997594681",
+        "latestRunAt": "2026-10-02T10:49:24Z",
+        "redRunsInARow": 1,
+        "redRunsCapped": false,
+        "lastPassingAt": "2026-09-18T13:56:43Z"
+      },
+      "summary": "Windows flake: `e2e/crawlSymlinks.test.ts` `EBUSY: resource busy or locked, rmdir` on temp dir. 1/94 jobs; history alternates pass/fail.",
+      "fixability": "medium (harden cleanup with rmSync maxRetries); maintainers active",
+      "existingFix": "none found",
+      "fork": false,
+      "openPRCount": 84
+    },
+    {
+      "rank": 14,
+      "repo": "sindresorhus/pify",
+      "repoUrl": "https://github.com/sindresorhus/pify",
+      "packages": [
+        {
+          "name": "pify",
+          "mirrorDownloadsSep2026": 8929685
+        }
+      ],
+      "archived": false,
+      "ci": {
+        "workflow": "CI",
+        "event": "push",
+        "url": "https://github.com/sindresorhus/pify/actions/runs/35386043123",
+        "latestRunAt": "2026-09-18T19:27:32Z",
+        "redRunsInARow": 2,
+        "redRunsCapped": true,
+        "lastPassingAt": null
+      },
+      "summary": "xo/eslint crash: `TypeError: Cannot read properties of undefined (reading 'getAllComments')` in `unicorn/expiring-todo-comments` (eslint-plugin-unicorn drift vs eslint 8). Matrix Node 14/16/18.",
+      "fixability": "easy-medium, low merge odds",
+      "existingFix": "none",
+      "fork": false,
+      "openPRCount": 0
+    },
+    {
+      "rank": 15,
+      "repo": "typescript-eslint/typescript-eslint",
+      "repoUrl": "https://github.com/typescript-eslint/typescript-eslint",
+      "packages": [
+        {
+          "name": "@typescript-eslint/types",
+          "mirrorDownloadsSep2026": 8919230
+        },
+        {
+          "name": "@typescript-eslint/typescript-estree",
+          "mirrorDownloadsSep2026": 8886824
+        },
+        {
+          "name": "@typescript-eslint/visitor-keys",
+          "mirrorDownloadsSep2026": 8739247
+        },
+        {
+          "name": "@typescript-eslint/scope-manager",
+          "mirrorDownloadsSep2026": 8542050
+        },
+        {
+          "name": "@typescript-eslint/utils",
+          "mirrorDownloadsSep2026": 7892556
+        },
+        {
+          "name": "@typescript-eslint/tsconfig-utils",
+          "mirrorDownloadsSep2026": 5941617
+        }
+      ],
+      "archived": false,
+      "ci": {
+        "workflow": "CI",
+        "event": "push",
+        "url": "https://github.com/typescript-eslint/typescript-eslint/actions/runs/38124573123",
+        "latestRunAt": "2026-10-11T08:22:31Z",
+        "redRunsInARow": 3,
+        "redRunsCapped": false,
+        "lastPassingAt": "2026-10-11T08:01:20Z"
+      },
+      "summary": "`type-utils:build` TS2694 (scope-manager dist missing `CatchClauseDefinition` etc.) from a stale Nx remote cache; 3 pushes in a row on 2026-10-11, maintainers already pushing CI tweaks.",
+      "fixability": "hard (internal cache/infra, transient)",
+      "existingFix": "n/a",
+      "fork": false,
+      "openPRCount": 36
+    },
+    {
+      "rank": 16,
+      "repo": "sindresorhus/object-assign",
+      "repoUrl": "https://github.com/sindresorhus/object-assign",
+      "packages": [
+        {
+          "name": "object-assign",
+          "mirrorDownloadsSep2026": 8803894
+        }
+      ],
+      "archived": false,
+      "ci": {
+        "workflow": "CI",
+        "event": "push",
+        "url": "https://github.com/sindresorhus/object-assign/actions/runs/35384570366",
+        "latestRunAt": "2026-09-18T19:11:52Z",
+        "redRunsInARow": 1,
+        "redRunsCapped": true,
+        "lastPassingAt": null
+      },
+      "summary": "Ancient toolchain (ava 0.16 / xo 0.16, Node 0.10–0.12 jobs): `SyntaxError: Unexpected identifier`, setup-node can't fetch 0.1x.",
+      "fixability": "easy technically, very low merge odds (frozen package)",
+      "existingFix": "none",
+      "fork": false,
+      "openPRCount": 0
+    },
+    {
+      "rank": 17,
+      "repo": "isaacs/chownr",
+      "repoUrl": "https://github.com/isaacs/chownr",
+      "packages": [
+        {
+          "name": "chownr",
+          "mirrorDownloadsSep2026": 8422092
+        }
+      ],
+      "archived": false,
+      "ci": {
+        "workflow": "CI",
+        "event": "push",
+        "url": "https://github.com/isaacs/chownr/actions/runs/19651473890",
+        "latestRunAt": "2025-11-24T22:32:53Z",
+        "redRunsInARow": 1,
+        "redRunsCapped": true,
+        "lastPassingAt": null
+      },
+      "summary": "Windows jobs (18.x/20.x) failed on the 2025-11-24 push. Logs expired.",
+      "fixability": "medium (needs repro)",
+      "existingFix": "none (#33/#34 Dependabot from 2023)",
+      "fork": false,
+      "openPRCount": 2
+    },
+    {
+      "rank": 18,
+      "repo": "tailwindlabs/tailwindcss",
+      "repoUrl": "https://github.com/tailwindlabs/tailwindcss",
+      "packages": [
+        {
+          "name": "tailwindcss",
+          "mirrorDownloadsSep2026": 7383814
+        }
+      ],
+      "archived": false,
+      "ci": {
+        "workflow": "Integration Tests",
+        "event": "push",
+        "url": "https://github.com/tailwindlabs/tailwindcss/actions/runs/37993256372",
+        "latestRunAt": "2026-10-09T21:24:27Z",
+        "redRunsInARow": 1,
+        "redRunsCapped": false,
+        "lastPassingAt": "2026-09-25T19:32:44Z"
+      },
+      "summary": "Integration test `integrations/vite/nuxt.test.ts:73` gets `''` instead of `.underline` on all 3 OSes (Nuxt vite-node `403 Forbidden` on a /node_modules path). First failing run is the push right after #20531 \"Release loader callbacks after compilation\": either a regression from that PR or Nuxt drift.",
+      "fixability": "medium",
+      "existingFix": "none found",
+      "fork": false,
+      "openPRCount": 59
+    },
+    {
+      "rank": 19,
+      "repo": "follow-redirects/follow-redirects",
+      "repoUrl": "https://github.com/follow-redirects/follow-redirects",
+      "packages": [
+        {
+          "name": "follow-redirects",
+          "mirrorDownloadsSep2026": 7257486
+        }
+      ],
+      "archived": false,
+      "ci": {
+        "workflow": "CI",
+        "event": "push",
+        "url": "https://github.com/follow-redirects/follow-redirects/actions/runs/37836068414",
+        "latestRunAt": "2026-10-08T19:59:35Z",
+        "redRunsInARow": 4,
+        "redRunsCapped": false,
+        "lastPassingAt": "2026-04-13T11:02:43Z"
+      },
+      "summary": "Only `test (24.x)` fails: `\"after each\" hook for \"set globally, on write\"` times out. Node 24.21.0 leaves the aborted POST connection open, so `server.close()` hangs. REPRODUCED locally on 24.21.0. Adding `server.closeAllConnections()` in test/server.js `stopServer` makes 257/257 pass on Node 24.21 and Node 20. Failing since 2026-10-01 (4 pushes).",
+      "fixability": "easy (verified 3-line test-harness fix)",
+      "existingFix": "none (#289 is an unrelated runtime fix)",
+      "fork": false,
+      "openPRCount": 3
+    },
+    {
+      "rank": 20,
+      "repo": "isaacs/fs.realpath",
+      "repoUrl": "https://github.com/isaacs/fs.realpath",
+      "packages": [
+        {
+          "name": "fs.realpath",
+          "mirrorDownloadsSep2026": 5268916
+        }
+      ],
+      "archived": false,
+      "ci": {
+        "workflow": "CI",
+        "event": "push",
+        "url": "https://github.com/isaacs/fs.realpath/actions/runs/18807190269",
+        "latestRunAt": "2025-10-25T18:58:14Z",
+        "redRunsInARow": 1,
+        "redRunsCapped": true,
+        "lastPassingAt": null
+      },
+      "summary": "Same infra issue as inherits: macOS arm64 has no Node 12.x/14.x.",
+      "fixability": "easy",
+      "existingFix": "none",
+      "fork": false,
+      "openPRCount": 0
+    }
+  ]
+}

@@ -349,6 +349,16 @@ try {
       const p = by(r);
       ok(`/status lists ${r} with a real light + fork link`, p && p.light.state !== 'unknown' && p.fork?.branch === 'patch-cloud' && /^https:\/\/github\.com\/fitzyracing1\//.test(p.fork.url) && /^https:\/\/github\.com\//.test(p.upstream?.url || ''), JSON.stringify(p && { l: p.light.state, f: p.fork, u: p.upstream }));
     }
+    // dark lights board (out-light #1): days dark, fork yes/no, one-line install, watchlist
+    ok('board: dark packages carry days dark', st.packages.filter((p) => p.light.state === 'dark' && p.npmName).every((p) => p.dark && typeof p.dark.days === 'number' && /day/.test(p.dark.label)), JSON.stringify(st.packages.map((p) => p.dark?.label)));
+    ok('board: lit packages have no dark info', st.packages.filter((p) => p.light.state === 'lit').every((p) => p.dark === null));
+    ok('board: install one-liner only when fork is served', st.packages.every((p) => (p.install ? ['active', 'manual'].includes(p.rewrite) && p.install.startsWith(`npm install ${p.npmName}`) && p.install.includes('--registry') : !['active', 'manual'].includes(p.rewrite))), JSON.stringify(st.packages.map((p) => [p.npmName, p.rewrite, p.install])));
+    ok('board: unzipper install pins fork version', uz.install === `npm install unzipper@0.12.5 --registry ${st.registry}`, uz.install);
+    ok('board HTML sections', sHtml.includes('dark lights board') && sHtml.includes('Dark now') && sHtml.includes('one-line install') && sHtml.includes(uz.install));
+    const wl = st.watchlist;
+    ok('watchlist present with repo links + summaries', wl && wl.entries.length >= 10 && wl.entries.every((e) => /^https:\/\/github\.com\//.test(e.repoUrl) && e.summary && e.dark.label && /fork/.test(e.fork)), wl && wl.entries.length);
+    ok('watchlist never says "failure"', !/failure/i.test(JSON.stringify(wl)));
+    ok('watchlist HTML rendered', sHtml.includes('id="watchlist"') && wl.entries.slice(0, 5).every((e) => sHtml.includes(e.repoUrl)));
     ok('third-party upstream PR labeled neutrally', /upstream fix PR/.test(uz.upstream.label) || /merged|closed/.test(uz.upstream.label), uz.upstream.label);
   }
   {

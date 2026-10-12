@@ -2,29 +2,29 @@
   {
     "repo": "nodejs/node",
     "conclusion": "success",
-    "workflow": "Coverage Windows",
-    "url": "https://github.com/nodejs/node/actions/runs/38181554792",
+    "workflow": "Notify on Push",
+    "url": "https://github.com/nodejs/node/actions/runs/38181554798",
     "lit": true,
-    "runAt": "2026-10-12T00:04:47Z",
-    "fetchedAt": "2026-10-12T01:38:19.277Z"
+    "runAt": "2026-10-11T22:43:55Z",
+    "fetchedAt": "2026-10-12T03:16:24.983Z"
   },
   {
     "repo": "microsoft/vscode",
     "conclusion": "success",
-    "workflow": "Monaco Editor checks",
-    "url": "https://github.com/microsoft/vscode/actions/runs/38191265651",
+    "workflow": "Code OSS (node_modules)",
+    "url": "https://github.com/microsoft/vscode/actions/runs/38196404058",
     "lit": true,
-    "runAt": "2026-10-12T01:20:49Z",
-    "fetchedAt": "2026-10-12T01:38:20.355Z"
+    "runAt": "2026-10-12T02:36:42Z",
+    "fetchedAt": "2026-10-12T03:16:26.181Z"
   },
   {
     "repo": "react/react",
     "conclusion": "success",
-    "workflow": "React Compiler (Rust)",
-    "url": "https://github.com/react/react/actions/runs/37679750806",
+    "workflow": "(Runtime) Build and Test",
+    "url": "https://github.com/react/react/actions/runs/37679750781",
     "lit": true,
-    "runAt": "2026-10-07T20:18:15Z",
-    "fetchedAt": "2026-10-12T01:38:21.428Z"
+    "runAt": "2026-10-07T20:13:28Z",
+    "fetchedAt": "2026-10-12T03:16:27.117Z"
   },
   {
     "repo": "rust-lang/rust",
@@ -33,7 +33,11 @@
     "url": "https://github.com/rust-lang/rust/actions/runs/38183257733",
     "lit": false,
     "runAt": "2026-10-12T00:59:19Z",
-    "fetchedAt": "2026-10-12T01:38:22.383Z"
+    "darkSince": "2026-10-11T23:10:12Z",
+    "darkRuns": 1,
+    "darkSinceCapped": false,
+    "lastPassingAt": "2026-10-11T23:12:09Z",
+    "fetchedAt": "2026-10-12T03:16:28.167Z"
   },
   {
     "repo": "vercel/next.js",
@@ -42,7 +46,11 @@
     "url": "https://github.com/vercel/next.js/actions/runs/38094923448",
     "lit": false,
     "runAt": "2026-10-11T00:09:38Z",
-    "fetchedAt": "2026-10-12T01:38:23.353Z"
+    "darkSince": "2026-10-10T23:58:16Z",
+    "darkRuns": 1,
+    "darkSinceCapped": false,
+    "lastPassingAt": "2026-10-10T23:25:00Z",
+    "fetchedAt": "2026-10-12T03:16:29.355Z"
   },
   {
     "repo": "denoland/deno",
@@ -51,16 +59,20 @@
     "url": "https://github.com/denoland/deno/actions/runs/37514460953",
     "lit": false,
     "runAt": "2026-10-06T22:10:55Z",
-    "fetchedAt": "2026-10-12T01:38:24.287Z"
+    "darkSince": "2026-09-08T11:41:42Z",
+    "darkRuns": 30,
+    "darkSinceCapped": true,
+    "lastPassingAt": null,
+    "fetchedAt": "2026-10-12T03:16:30.447Z"
   },
   {
     "repo": "python/cpython",
     "conclusion": "success",
-    "workflow": "Tests",
-    "url": "https://github.com/python/cpython/actions/runs/38187212083",
+    "workflow": "Lint",
+    "url": "https://github.com/python/cpython/actions/runs/38197435777",
     "lit": true,
-    "runAt": "2026-10-12T00:41:36Z",
-    "fetchedAt": "2026-10-12T01:38:25.212Z"
+    "runAt": "2026-10-12T02:51:57Z",
+    "fetchedAt": "2026-10-12T03:16:31.313Z"
   },
   {
     "repo": "fitzyracing1/fakegreen",
@@ -69,7 +81,7 @@
     "url": "https://github.com/fitzyracing1/fakegreen/actions/runs/37534834304",
     "lit": true,
     "runAt": "2026-10-06T21:35:06Z",
-    "fetchedAt": "2026-10-12T01:38:26.074Z"
+    "fetchedAt": "2026-10-12T03:16:31.800Z"
   },
   {
     "repo": "ZJONSSON/node-unzipper",
@@ -78,7 +90,11 @@
     "url": "https://github.com/ZJONSSON/node-unzipper/actions/runs/28748726826",
     "lit": false,
     "runAt": "2026-07-05T17:19:45Z",
-    "fetchedAt": "2026-10-12T01:38:26.909Z"
+    "darkSince": "2026-07-05T17:23:45Z",
+    "darkRuns": 2,
+    "darkSinceCapped": false,
+    "lastPassingAt": "2026-06-21T16:39:18Z",
+    "fetchedAt": "2026-10-12T03:16:32.322Z"
   },
   {
     "repo": "jimp-dev/jimp",
@@ -87,7 +103,11 @@
     "url": "https://github.com/jimp-dev/jimp/actions/runs/24095927252",
     "lit": false,
     "runAt": "2026-04-07T17:49:19Z",
-    "fetchedAt": "2026-10-12T01:38:27.784Z"
+    "darkSince": "2026-04-07T17:47:08Z",
+    "darkRuns": 1,
+    "darkSinceCapped": false,
+    "lastPassingAt": "2026-04-07T17:52:35Z",
+    "fetchedAt": "2026-10-12T03:16:32.695Z"
   },
   {
     "repo": "vercel/ms",
@@ -96,7 +116,11 @@
     "url": "https://github.com/vercel/ms/actions/runs/26193334159",
     "lit": false,
     "runAt": "2026-05-20T22:21:03Z",
-    "fetchedAt": "2026-10-12T01:38:28.735Z"
+    "darkSince": "2026-05-20T22:20:39Z",
+    "darkRuns": 1,
+    "darkSinceCapped": false,
+    "lastPassingAt": "2026-05-20T22:21:08Z",
+    "fetchedAt": "2026-10-12T03:16:33.275Z"
   },
   {
     "repo": "prebuild/prebuild-install",
@@ -105,7 +129,11 @@
     "url": "https://github.com/prebuild/prebuild-install/actions/runs/21780088731",
     "lit": false,
     "runAt": "2026-02-07T12:27:53Z",
-    "fetchedAt": "2026-10-12T01:38:29.638Z"
+    "darkSince": "2026-02-07T12:27:11Z",
+    "darkRuns": 1,
+    "darkSinceCapped": true,
+    "lastPassingAt": null,
+    "fetchedAt": "2026-10-12T03:16:33.616Z"
   },
   {
     "repo": "ajv-validator/ajv",
@@ -114,7 +142,11 @@
     "url": "https://github.com/ajv-validator/ajv/actions/runs/24892856278",
     "lit": false,
     "runAt": "2026-04-24T23:02:15Z",
-    "fetchedAt": "2026-10-12T01:38:30.659Z"
+    "darkSince": "2026-04-24T13:12:04Z",
+    "darkRuns": 2,
+    "darkSinceCapped": false,
+    "lastPassingAt": "2026-04-24T07:42:45Z",
+    "fetchedAt": "2026-10-12T03:16:34.090Z"
   },
   {
     "repo": "cli-table/cli-table3",
@@ -123,7 +155,11 @@
     "url": "https://github.com/cli-table/cli-table3/actions/runs/24635946804",
     "lit": false,
     "runAt": "2026-04-20T00:08:06Z",
-    "fetchedAt": "2026-10-12T01:38:31.557Z"
+    "darkSince": "2026-04-20T00:07:51Z",
+    "darkRuns": 1,
+    "darkSinceCapped": true,
+    "lastPassingAt": null,
+    "fetchedAt": "2026-10-12T03:16:34.427Z"
   },
   {
     "repo": "iamkun/dayjs",
@@ -132,6 +168,6 @@
     "url": "https://github.com/iamkun/dayjs/actions/runs/34964122521",
     "lit": true,
     "runAt": "2026-09-15T11:36:35Z",
-    "fetchedAt": "2026-10-12T01:38:32.539Z"
+    "fetchedAt": "2026-10-12T03:16:35.315Z"
   }
 ]

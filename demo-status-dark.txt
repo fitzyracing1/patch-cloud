@@ -1,0 +1,146 @@
+=== patch-cloud /status (dark light) ===
+Time: Oct 11, 2026 6:47 PM ET
+{
+  "service": "patch-cloud",
+  "registry": "http://127.0.0.1:4873",
+  "lightsFile": "/workspace/greenlight-computer/lights.json",
+  "localLights": "/workspace/patch-cloud/local-lights.json",
+  "packages": [
+    {
+      "repo": "local/broken-demo",
+      "npmName": "broken-demo",
+      "lit": false,
+      "conclusion": "failure",
+      "lightSource": "local-override",
+      "rewriteReady": true,
+      "rewriteActive": true,
+      "forkPath": "/workspace/patch-cloud/forks/broken-demo",
+      "forkTarball": "/workspace/patch-cloud/tarballs/broken-demo-1.0.0-fork.tgz",
+      "upstreamTarball": "/workspace/patch-cloud/tarballs/broken-demo-1.0.0-upstream.tgz",
+      "note": "Fully working local demo: dark → fork, lit → upstream",
+      "wouldRewrite": null
+    },
+    {
+      "repo": "react/react",
+      "npmName": "react",
+      "lit": true,
+      "conclusion": "success",
+      "lightSource": "lights.json",
+      "rewriteReady": false,
+      "rewriteActive": false,
+      "forkPath": null,
+      "forkTarball": null,
+      "upstreamTarball": null,
+      "note": "Eligible when fork ready. Demo uses broken-demo. Would rewrite to fitzyracing1/react (not packaged).",
+      "wouldRewrite": null
+    },
+    {
+      "repo": "vercel/next.js",
+      "npmName": "next",
+      "lit": false,
+      "conclusion": "failure",
+      "lightSource": "lights.json",
+      "rewriteReady": false,
+      "rewriteActive": false,
+      "forkPath": null,
+      "forkTarball": null,
+      "upstreamTarball": null,
+      "note": "Eligible when fork ready. Demo uses broken-demo. Would rewrite to fitzyracing1/next (not packaged).",
+      "wouldRewrite": "would rewrite next → fitzyracing1/next (not packaged; demo uses broken-demo)"
+    },
+    {
+      "repo": "denoland/deno",
+      "npmName": null,
+      "lit": false,
+      "conclusion": "failure",
+      "lightSource": "lights.json",
+      "rewriteReady": false,
+      "rewriteActive": false,
+      "forkPath": null,
+      "forkTarball": null,
+      "upstreamTarball": null,
+      "note": "Deno is a binary/runtime, not an npm install target. CI patch lives at /workspace/ci-fixes/deno.",
+      "wouldRewrite": null
+    },
+    {
+      "repo": "nodejs/node",
+      "npmName": null,
+      "lit": false,
+      "conclusion": "failure",
+      "lightSource": "lights.json",
+      "rewriteReady": false,
+      "rewriteActive": false,
+      "forkPath": null,
+      "forkTarball": null,
+      "upstreamTarball": null,
+      "note": "Not an npm package to replace via registry rewrite.",
+      "wouldRewrite": null
+    },
+    {
+      "repo": "microsoft/vscode",
+      "npmName": null,
+      "lit": true,
+      "conclusion": "success",
+      "lightSource": "lights.json",
+      "rewriteReady": false,
+      "rewriteActive": false,
+      "forkPath": null,
+      "forkTarball": null,
+      "upstreamTarball": null,
+      "note": "Not a typical npm install of the whole editor.",
+      "wouldRewrite": null
+    },
+    {
+      "repo": "rust-lang/rust",
+      "npmName": null,
+      "lit": true,
+      "conclusion": "success",
+      "lightSource": "lights.json",
+      "rewriteReady": false,
+      "rewriteActive": false,
+      "forkPath": null,
+      "forkTarball": null,
+      "upstreamTarball": null,
+      "note": "Not an npm package.",
+      "wouldRewrite": null
+    },
+    {
+      "repo": "python/cpython",
+      "npmName": null,
+      "lit": true,
+      "conclusion": "success",
+      "lightSource": "lights.json",
+      "rewriteReady": false,
+      "rewriteActive": false,
+      "forkPath": null,
+      "forkTarball": null,
+      "upstreamTarball": null,
+      "note": "Not an npm package.",
+      "wouldRewrite": null
+    },
+    {
+      "repo": "fitzyracing1/fakegreen",
+      "npmName": null,
+      "lit": true,
+      "conclusion": "success",
+      "lightSource": "lights.json",
+      "rewriteReady": false,
+      "rewriteActive": false,
+      "forkPath": null,
+      "forkTarball": null,
+      "upstreamTarball": null,
+      "note": "Light-computer demo repo; not an npm package.",
+      "wouldRewrite": null
+    }
+  ],
+  "legend": {
+    "lit": "CI success → pass through / serve upstream",
+    "dark": "CI failure → rewrite to fork when rewriteReady"
+  }
+}
+=== /health ===
+{
+  "ok": true,
+  "service": "patch-cloud",
+  "port": 4873
+}

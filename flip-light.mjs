@@ -3,7 +3,7 @@
  * flip-light.mjs — set local/broken-demo light to dark or lit without waiting on GitHub.
  * Usage: node flip-light.mjs dark|lit
  */
-import { readFileSync, writeFileSync, existsSync } from 'node:fs';
+import { readFileSync, writeFileSync } from 'node:fs';
 import { join, dirname } from 'node:path';
 import { fileURLToPath } from 'node:url';
 
@@ -15,13 +15,13 @@ if (mode !== 'dark' && mode !== 'lit') {
   process.exit(1);
 }
 const lit = mode === 'lit';
-const data = existsSync(FILE) ? JSON.parse(readFileSync(FILE, 'utf8')) : {};
+const data = JSON.parse(readFileSync(FILE, 'utf8'));
 const now = new Date().toISOString();
 data['local/broken-demo'] = {
   repo: 'local/broken-demo',
   conclusion: lit ? 'success' : 'failure',
   workflow: 'local-demo',
-  url: 'file:local-lights.json',
+  url: 'file:///workspace/patch-cloud/local-lights.json',
   lit,
   runAt: now,
   fetchedAt: now,
