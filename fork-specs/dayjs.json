@@ -1,0 +1,7 @@
+{"fork":"fitzyracing1/dayjs","branch":"patch-cloud","upstreamRepo":"iamkun/dayjs",
+"upstreamPr":"https://github.com/iamkun/dayjs/pull/2019",
+"baseRef":"tag v1.11.23",
+"fix":"timezone plugin: .tz() reuses one cached Intl.DateTimeFormat per zone instead of calling Date#toLocaleString (which builds a new formatter every call). About 5-6x faster per .tz() call with identical results.",
+"credit":["@logeyG (PR #2019 author; Co-authored-by in the fork commit)"],
+"changes":["src/plugin/timezone/index.js -> plugin/timezone.js and esm/plugin/timezone/index.js: cached formatter (getLocaleStringifier from PR #2019) with exactly toLocaleString()'s default options, so the formatted string is identical. The PR's unrelated options refactor was not applied (it no longer applied cleanly).","Every other built file is byte-identical to the published dayjs@1.11.23 tarball (locale.json differs only in entry order)."],
+"verification":["Formatter output equals Date#toLocaleString for 37,200 timestamps x 8 zones.","Benchmark: 20,000 x dayjs(t).tz(zone): about 300 ms vs about 1,700 ms for upstream 1.11.23 (x5.8), identical formatted results.","Upstream timezone tests pass in 4 TZs (54/54 each); full jest suite 792/794 with the 2 failures (localizedFormat, dayOfYear) identical on unmodified 1.11.23 when TZ=America/New_York and passing with TZ=UTC."]}

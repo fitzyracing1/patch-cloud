@@ -1,0 +1,7 @@
+{"fork":"fitzyracing1/jimp","branch":"patch-cloud","upstreamRepo":"jimp-dev/jimp",
+"upstreamIssue":"https://github.com/jimp-dev/jimp/issues/1402",
+"baseRef":"tag v1.6.1",
+"pkgJsonPath":"packages/jimp/package.json",
+"fix":"Ship the real Rollup browser bundle in dist/browser/index.js (and its index.d.ts) instead of the 98-byte stub published in jimp@1.6.1, so bundlers that resolve the \"browser\" export condition get Jimp, ResizeStrategy, etc.",
+"changes":["turbo.json: build:browser now depends on the same package's build and declares dist/browser/** as an output, so tshy cannot overwrite the Rollup bundle and turbo cache hits restore it.","Tarball: dist/browser/index.js (708 KB bundle) and dist/browser/index.d.ts (117 KB) replace the stubs; the shipped dist/browser/index.js.map is the same size as the one already published in 1.6.1. Other files match the published 1.6.1 tarball."],
+"verification":["Reproduced the bug: with the original turbo.json, a cached rebuild produces the same 98-byte stub that was published; with the fix it produces the real bundle.","Bundling import { Jimp, ResizeStrategy } from \"jimp\" with esbuild (platform=browser) yields defined exports, and the browser bundle creates, resizes and PNG-encodes an image; with upstream 1.6.1 esbuild fails with \"No matching export in node_modules/jimp/dist/browser/index.js for import Jimp\" (other bundlers silently yield undefined)."]}

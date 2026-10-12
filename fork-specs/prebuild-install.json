@@ -1,0 +1,7 @@
+{"fork":"fitzyracing1/prebuild-install","branch":"patch-cloud","upstreamRepo":"prebuild/prebuild-install",
+"upstreamPr":"https://github.com/prebuild/prebuild-install/pull/214","upstreamIssue":"https://github.com/prebuild/prebuild-install/issues/213",
+"baseRef":"tag v7.1.3",
+"fix":"Require tar-fs ^2.1.4 instead of ^2.0.0 so vulnerable tar-fs (CVE-2025-59343 / GHSA-vj76-c3g6-qr5v, symlink validation bypass) can no longer satisfy prebuild-install's dependency.",
+"credit":["@alichtman (PR #214 author; Co-authored-by in the fork commit)"],
+"changes":["package.json: \"tar-fs\": \"^2.0.0\" -> \"^2.1.4\" (plus trailing newline). No source changes.","Note: a fresh install of upstream 7.1.3 already resolves tar-fs 2.1.5; this change matters when an existing lockfile or dedupe keeps an older tar-fs (e.g. 2.1.1) under prebuild-install."],
+"verification":["Project with a lockfile pinning tar-fs@2.1.1 under prebuild-install@7.1.3: npm audit reports GHSA-vj76-c3g6-qr5v; after installing this build, npm upgrades tar-fs to >=2.1.4 and npm audit no longer reports it.","Upstream tape tests: download-test (tar-fs extraction) 35/35, rc 57, util 27, proxy 9, skip 6, log 3 pass. asset-test fails identically with and without this change (pre-existing; Node 20 stream incompatibility in the test harness)."]}

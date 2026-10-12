@@ -1,0 +1,7 @@
+{"fork":"fitzyracing1/cli-table3","branch":"patch-cloud","upstreamRepo":"cli-table/cli-table3",
+"upstreamPr":"https://github.com/cli-table/cli-table3/pull/359",
+"baseRef":"tag v0.6.5",
+"fix":"A rowSpan that extends past the last row is clamped instead of crashing with \"TypeError: Cannot read properties of undefined (reading 'length')\".",
+"credit":["@spokodev (PR #359 author; Co-authored-by in the fork commit)"],
+"changes":["src/layout-manager.js: stop inserting RowSpanCells once the target row does not exist (PR #359, applied cleanly).","test/issues/rowspan-overflow-test.js: regression test from the PR (not shipped in the package)."],
+"verification":["new Table().push([{ content: 'aaaa bbbb', rowSpan: 2 }]); table.toString() renders; upstream 0.6.5 throws.","Upstream jest suite: 292 passed, 1 skipped, 1 failed; the failure (original-cli-table 'test table colors') fails identically on unmodified 0.6.5 in this environment."]}

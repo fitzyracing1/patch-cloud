@@ -38,7 +38,11 @@ import {
   STATUS_VERBOSE,
   COUNTS_DIR,
   COUNTS_FLUSH_MS,
+  LIGHTS_REFRESH_MINUTES,
+  UPSTREAM_REFRESH_MINUTES,
+  PACKUMENT_CACHE_MINUTES,
 } from './config.mjs';
+import { gunzipSync } from 'node:zlib';
 
 const LOCAL_LIGHTS = join(ROOT, 'local-lights.json');
 const MAPPING_FILE = join(ROOT, 'mapping.json');
@@ -49,7 +53,7 @@ const UA = 'patch-cloud/0.2 (+https://github.com/fitzyracing1)';
 // --- lights cache -----------------------------------------------------------
 let lightsCache = { at: 0, byRepo: new Map(), refreshing: false };
 
-const LIGHT_REPOS = [
+const BASE_LIGHT_REPOS = [
   'nodejs/node',
   'microsoft/vscode',
   'react/react',
@@ -59,6 +63,24 @@ const LIGHT_REPOS = [
   'python/cpython',
   'fitzyracing1/fakegreen',
 ];
+
+/** Repos whose lights are tracked live: the light computer's 8 + every GitHub repo in mapping.json. */
+function lightRepos() {
+  const set = new Set(BASE_LIGHT_REPOS);
+  for (const repo of Object.keys(loadMapping())) {
+    if (/^[\w.-]+\/[\w.-]+$/.test(repo) && !repo.startsWith('local/')) set.add(repo);
+  }
+  return [...set];
+}
+
+// GitHub rate-limit backoff (unauthenticated API: 60 requests/hour/IP)
+let ghBackoffUntil = 0;
+function noteRateLimit(res) {
+  if ((res.status === 403 || res.status === 429) && res.headers.get('x-ratelimit-remaining') === '0') {
+    const reset = Number(res.headers.get('x-ratelimit-reset'));
+    ghBackoffUntil = Number.isFinite(reset) && reset > 0 ? reset * 1000 : Date.now() + 15 * 60 * 1000;
+  }
+}
 
 function loadJson(p, fallback = null) {
   try {
@@ -91,7 +113,10 @@ async function fetchOneLight(repo) {
   };
   if (GITHUB_TOKEN) headers.Authorization = `Bearer ${GITHUB_TOKEN}`;
   const res = await fetch(url, { headers });
-  if (!res.ok) throw new Error(`${repo}: HTTP ${res.status}`);
+  if (!res.ok) {
+    noteRateLimit(res);
+    throw new Error(`${repo}: HTTP ${res.status}`);
+  }
   const data = await res.json();
   const run = data.workflow_runs && data.workflow_runs[0];
   if (!run) throw new Error(`${repo}: no completed runs`);
@@ -107,10 +132,29 @@ async function fetchOneLight(repo) {
 }
 
 async function refreshLightsFromGitHub() {
-  const results = await Promise.allSettled(LIGHT_REPOS.map(fetchOneLight));
+  if (Date.now() < ghBackoffUntil) throw new Error(`GitHub rate limited until ${new Date(ghBackoffUntil).toISOString()}`);
+  const repos = lightRepos();
+  const results = await Promise.allSettled(repos.map(fetchOneLight));
+  // Keep the last known light for repos whose fetch failed (rate limit / network),
+  // so a partial refresh never makes a light "unknown" and silently drops a rewrite.
+  const prev = new Map((loadJson(LIGHTS_FILE, []) || []).map((l) => [l.repo, l]));
+  for (const [repo, l] of lightsCache.byRepo) {
+    if (l.source !== 'local-override') {
+      const { source, ...rest } = l; // eslint-disable-line no-unused-vars
+      prev.set(repo, rest); // in-memory beats the (possibly read-only) file
+    }
+  }
   const lights = [];
-  for (const r of results) if (r.status === 'fulfilled') lights.push(r.value);
-  if (lights.length) {
+  let fresh = 0;
+  results.forEach((r, i) => {
+    if (r.status === 'fulfilled') {
+      lights.push(r.value);
+      fresh += 1;
+    } else if (prev.has(repos[i])) {
+      lights.push({ ...prev.get(repos[i]), stale: true });
+    }
+  });
+  if (fresh) {
     try {
       writeFileSync(LIGHTS_FILE, JSON.stringify(lights, null, 2) + '\n');
     } catch (e) {
@@ -120,14 +164,17 @@ async function refreshLightsFromGitHub() {
   return lights;
 }
 
+let lastLightsRefreshAt = 0;
 async function ensureLights() {
   const maxAge = Math.max(0, LIGHTS_CACHE_MINUTES) * 60 * 1000;
   const now = Date.now();
-  if (lightsCache.byRepo.size && now - lightsCache.at < maxAge) {
+  const refreshDue = LIGHTS_REFRESH && now - lastLightsRefreshAt >= Math.max(0, LIGHTS_REFRESH_MINUTES) * 60 * 1000;
+  if (lightsCache.byRepo.size && now - lightsCache.at < maxAge && !refreshDue) {
     return lightsCache.byRepo;
   }
-  if (LIGHTS_REFRESH && !lightsCache.refreshing) {
+  if (refreshDue && !lightsCache.refreshing) {
     lightsCache.refreshing = true;
+    lastLightsRefreshAt = now;
     try {
       const lights = await refreshLightsFromGitHub();
       lightsCache.byRepo = mergeLights(lights);
@@ -168,11 +215,83 @@ function findMappingByNpmName(npmName) {
   return null;
 }
 
+const integrityCache = new Map();
 function fileIntegrity(absPath) {
+  const st = statSync(absPath);
+  const key = `${absPath}:${st.size}:${st.mtimeMs}`;
+  if (integrityCache.has(key)) return integrityCache.get(key);
   const buf = readFileSync(absPath);
   const shasum = createHash('sha1').update(buf).digest('hex');
   const integrity = 'sha512-' + createHash('sha512').update(buf).digest('base64');
-  return { shasum, integrity, size: buf.length };
+  const out = { shasum, integrity, size: buf.length };
+  integrityCache.set(key, out);
+  return out;
+}
+
+/** Read <top>/package.json out of a .tgz (no deps; ustar + pax path headers). */
+const manifestCache = new Map();
+function tarballManifest(rel) {
+  const abs = join(ROOT, rel);
+  let st;
+  try {
+    st = statSync(abs);
+  } catch {
+    return null;
+  }
+  const key = `${abs}:${st.size}:${st.mtimeMs}`;
+  if (manifestCache.has(key)) return manifestCache.get(key);
+  let found = null;
+  try {
+    const buf = gunzipSync(readFileSync(abs));
+    const cstr = (b) => b.toString('utf8').replace(/\0[\s\S]*$/, '');
+    let off = 0;
+    let paxPath = null;
+    while (off + 512 <= buf.length) {
+      const h = buf.subarray(off, off + 512);
+      if (h.every((b) => b === 0)) break;
+      let name = cstr(h.subarray(0, 100));
+      const prefix = cstr(h.subarray(345, 500));
+      if (prefix) name = `${prefix}/${name}`;
+      const size = parseInt(cstr(h.subarray(124, 136)).trim() || '0', 8);
+      const type = h[156];
+      const body = buf.subarray(off + 512, off + 512 + size);
+      if (type === 0x78 /* x */) {
+        const m = body.toString('utf8').match(/\d+ path=([^\n]*)\n/);
+        paxPath = m ? m[1] : null;
+      } else if (type === 0x30 /* 0 */ || type === 0) {
+        const path = paxPath || name;
+        paxPath = null;
+        if (/^[^/]+\/package\.json$/.test(path)) {
+          found = JSON.parse(body.toString('utf8'));
+          break;
+        }
+      }
+      off += 512 + Math.ceil(size / 512) * 512;
+    }
+  } catch (e) {
+    console.warn(`could not read package.json from ${rel}:`, e.message || e);
+  }
+  manifestCache.set(key, found);
+  return found;
+}
+
+/** Full version manifest for a served tarball (deps, bin, engines, … from its package.json). */
+function versionManifest(req, npmName, version, tarballRel, extra = {}) {
+  const abs = join(ROOT, tarballRel);
+  const { shasum, integrity } = fileIntegrity(abs);
+  const tarball = `${baseUrl(req)}/${npmName}/-/${tarballFileName(npmName, version)}`;
+  const pj = tarballManifest(tarballRel) || {};
+  // eslint-disable-next-line no-unused-vars
+  const { readme, readmeFilename, _patchCloud: pkgPatchCloud, ...rest } = pj;
+  return {
+    ...rest,
+    name: npmName,
+    version,
+    _id: `${npmName}@${version}`,
+    ...extra,
+    _patchCloud: { ...(pkgPatchCloud || {}), ...(extra._patchCloud || {}) },
+    dist: { tarball, shasum, integrity },
+  };
 }
 
 function baseUrl(req) {
@@ -189,16 +308,7 @@ function tarballFileName(npmName, version) {
 }
 
 function packageMeta(req, npmName, version, tarballRel, description, extra = {}) {
-  const abs = join(ROOT, tarballRel);
-  const { shasum, integrity } = fileIntegrity(abs);
-  const tarball = `${baseUrl(req)}/${npmName}/-/${tarballFileName(npmName, version)}`;
-  const verObj = {
-    name: npmName,
-    version,
-    description,
-    dist: { tarball, shasum, integrity },
-    ...extra,
-  };
+  const verObj = versionManifest(req, npmName, version, tarballRel, extra);
   return {
     _id: npmName,
     name: npmName,
@@ -213,11 +323,88 @@ function packageMeta(req, npmName, version, tarballRel, description, extra = {})
   };
 }
 
+// --- rewrites merged into the upstream packument ------------------------------
+// While a rewrite is active, only the fork's version entry is replaced; every
+// other upstream version (and upstream dist-tags) stays resolvable, so ranges
+// like ms@2.0.0 or ajv@^6 never fail with ETARGET just because one version is
+// rewritten. Falls back to a single-version document if npm is unreachable.
+const packumentCache = new Map();
+const PACKUMENT_CACHE_MAX_BYTES = 25 * 1024 * 1024;
+
+async function upstreamPackument(npmName, accept) {
+  const corgi = /application\/vnd\.npm\.install-v1\+json/.test(accept || '');
+  const key = `${npmName}|${corgi ? 'corgi' : 'full'}`;
+  const hit = packumentCache.get(key);
+  if (hit && Date.now() - hit.at < Math.max(0, PACKUMENT_CACHE_MINUTES) * 60 * 1000) return JSON.parse(hit.body);
+  const res = await fetch(`${UPSTREAM}/${npmName.replace('/', '%2F')}`, {
+    headers: { Accept: corgi ? 'application/vnd.npm.install-v1+json' : 'application/json', 'User-Agent': UA },
+  });
+  if (!res.ok) throw new Error(`upstream packument ${npmName}: HTTP ${res.status}`);
+  const body = await res.text();
+  if (body.length <= PACKUMENT_CACHE_MAX_BYTES) packumentCache.set(key, { at: Date.now(), body });
+  return JSON.parse(body);
+}
+
+async function rewrittenPackument(req, mapped, mode) {
+  const npmName = mapped.npmName;
+  const version = mapped.version || '1.0.0';
+  const meta = {
+    rewrite: true,
+    source: mode, // 'fork' (light dark) | 'manual' (labeled manual switch, light lit)
+    lightRepo: mapped.repo,
+    fork: mapped.forkRepo || null,
+    branch: mapped.forkBranch || null,
+    pr: mapped.upstreamUrl || mapped.ciPatch?.upstreamUrl || null,
+    ...(mode === 'manual' ? { manual: { label: 'manual: fix available', reason: mapped.manualRewrite?.reason || null, since: mapped.manualRewrite?.since || null } } : {}),
+  };
+  const description =
+    mode === 'manual'
+      ? `FORK — manual: fix available (CI light lit; fix waiting upstream). ${publicNote(mapped) || ''}`
+      : `FORK / annotated — rewrite active (light dark). ${publicNote(mapped) || ''}`;
+  const verObj = versionManifest(req, npmName, version, mapped.forkTarball, { _patchCloud: meta });
+  let up = null;
+  if (mapped.upstreamProxy && mapped.mergeUpstream !== false) {
+    try {
+      up = await upstreamPackument(npmName, req.headers.accept);
+    } catch (e) {
+      console.warn('upstream packument unavailable, serving fork version only:', e.message || e);
+    }
+  }
+  if (up && up.versions && typeof up.versions === 'object') {
+    const out = { ...up, description, versions: { ...up.versions, [version]: verObj } };
+    delete out._rev;
+    if (!out['dist-tags'] || !out['dist-tags'].latest) out['dist-tags'] = { ...(out['dist-tags'] || {}), latest: version };
+    if (out.time && !out.time[version]) out.time = { ...out.time, [version]: new Date().toISOString() };
+    out._patchCloud = { ...meta, replacedVersion: version, otherVersions: 'upstream (registry.npmjs.org)' };
+    return out;
+  }
+  const single = packageMeta(req, npmName, version, mapped.forkTarball, description, { _patchCloud: meta });
+  single._patchCloud = { ...meta, replacedVersion: version, otherVersions: 'unavailable (upstream unreachable)' };
+  return single;
+}
+
+/** How a mapped package is served right now. Never alters the light itself. */
+function rewriteMode(mapped, light) {
+  const dark = !!light && light.lit === false;
+  if (!mapped || !mapped.rewriteReady || !mapped.npmName) return { mode: 'none', dark };
+  if (dark) return { mode: 'fork', dark };
+  if (hasManual(mapped)) return { mode: 'manual', dark };
+  return { mode: 'none', dark };
+}
+
+function hasManual(m) {
+  return !!(m && m.manualRewrite && typeof m.manualRewrite === 'object' && m.manualRewrite.reason);
+}
+
 // --- upstream PR/issue state (public GitHub REST, cached) --------------------
 // Seeded from upstream-status.json (written by check-upstream.mjs); refreshed
 // via fetch so it also works in the container (no `gh` there). Read-only.
-const UPSTREAM_TTL_MS = 10 * 60 * 1000;
+const UPSTREAM_TTL_MS = Math.max(1, UPSTREAM_REFRESH_MINUTES) * 60 * 1000;
 let upstreamCache = { at: 0, results: null, refreshing: null };
+
+function upstreamUrlOf(m) {
+  return m.upstreamUrl || m.ciPatch?.upstreamUrl || null;
+}
 
 function parseUpstreamUrl(url) {
   if (!url) return null;
@@ -236,8 +423,12 @@ async function ghApi(path) {
     'X-GitHub-Api-Version': '2022-11-28',
   };
   if (GITHUB_TOKEN) headers.Authorization = `Bearer ${GITHUB_TOKEN}`;
+  if (Date.now() < ghBackoffUntil) throw new Error('GitHub rate limited');
   const res = await fetch(`https://api.github.com${path}`, { headers });
-  if (!res.ok) throw new Error(`HTTP ${res.status}`);
+  if (!res.ok) {
+    noteRateLimit(res);
+    throw new Error(`HTTP ${res.status}`);
+  }
   return res.json();
 }
 
@@ -274,7 +465,7 @@ async function ensureUpstream() {
     const checkedAt = new Date().toISOString();
     await Promise.all(
       Object.entries(mapping).map(async ([repo, m]) => {
-        const url = m.ciPatch?.upstreamUrl;
+        const url = upstreamUrlOf(m);
         const parsed = parseUpstreamUrl(url);
         if (!parsed) return;
         try {
@@ -304,7 +495,7 @@ async function ensureUpstream() {
 // aggregated under one "other" bucket so the file stays bounded. /, /status,
 // /health are never counted. Persisted to $COUNTS_DIR/downloads.json (debounced)
 // when COUNTS_DIR is set and writable; otherwise in-memory since last restart.
-const COUNT_KINDS = ['fork', 'upstream', 'metadata'];
+const COUNT_KINDS = ['fork', 'upstream', 'metadata', 'manual'];
 const OTHER_BUCKET = '(other, proxied)';
 const HOUR_MS = 3600_000;
 const counter = {
@@ -319,7 +510,7 @@ const counter = {
 };
 
 function zeroCounts() {
-  return { fork: 0, upstream: 0, metadata: 0 };
+  return { fork: 0, upstream: 0, metadata: 0, manual: 0 };
 }
 
 function hourKey(t = Date.now()) {
@@ -386,7 +577,7 @@ function scheduleFlush() {
   counter.flushTimer.unref?.();
 }
 
-/** kind: 'fork' | 'upstream' | 'metadata'. Unmapped names go to one bucket. */
+/** kind: 'fork' | 'upstream' | 'metadata' | 'manual' (fork tarball served via the manual switch). Unmapped names go to one bucket. */
 function countHit(npmName, kind, mapped) {
   if (!COUNT_KINDS.includes(kind)) return;
   const name = mapped && mapped.npmName ? mapped.npmName : OTHER_BUCKET;
@@ -429,10 +620,10 @@ function downloadsSummary() {
     note: counter.persistent
       ? 'counts persisted across restarts'
       : `counts since last restart ${counter.startedAt} (not persisted)`,
-    total: { ...total, tarballs: total.fork + total.upstream },
-    last24h: { ...last24h, tarballs: last24h.fork + last24h.upstream },
+    total: { ...total, tarballs: total.fork + total.upstream + total.manual },
+    last24h: { ...last24h, tarballs: last24h.fork + last24h.upstream + last24h.manual },
     other: downloadsFor(OTHER_BUCKET),
-    counted: 'tarball GETs served from fork / upstream (incl. proxied) and package metadata GETs; /, /status, /health not counted; no IPs stored',
+    counted: 'tarball GETs served from fork (light dark) / manual switch / upstream (incl. proxied) and package metadata GETs; /, /status, /health not counted; no IPs stored',
   };
 }
 
@@ -456,7 +647,7 @@ function publicNote(m) {
 }
 
 function upstreamPublic(m, up) {
-  const url = m.ciPatch?.upstreamUrl;
+  const url = upstreamUrlOf(m);
   if (!url || !/^https:\/\/github\.com\//.test(url)) return null;
   const parsed = parseUpstreamUrl(url);
   const isComment = /#issuecomment-/.test(url);
@@ -467,7 +658,14 @@ function upstreamPublic(m, up) {
     issue: { open: 'issue filed upstream', closed: 'upstream issue closed', merged: 'upstream issue closed', unknown: 'issue filed upstream' },
     'pr-comment': { open: 'fix proposed on upstream PR', merged: 'upstream PR merged', closed: 'upstream PR closed', unknown: 'fix proposed on upstream PR' },
   };
-  return { url, kind, state, label: labels[kind][state] };
+  // Upstream PRs/issues written by someone else (the fork just applies them)
+  const thirdParty = {
+    pr: { open: 'upstream fix PR open (not merged)', merged: 'fix merged upstream', closed: 'upstream PR closed (not merged)', unknown: 'upstream fix PR' },
+    issue: { open: 'upstream issue open', closed: 'upstream issue closed', merged: 'upstream issue closed', unknown: 'upstream issue' },
+    'pr-comment': labels['pr-comment'],
+  };
+  const table = m.upstreamRole === 'third-party' ? thirdParty : labels;
+  return { url, kind, state, label: table[kind][state] };
 }
 
 function forkPublic(m) {
@@ -481,6 +679,58 @@ function forkPublic(m) {
   };
 }
 
+/** Human wording for an upstream CI conclusion (never the bare word "failure"). */
+function ciWord(conclusion) {
+  const c = String(conclusion || 'unknown');
+  if (c === 'success') return 'passing';
+  if (/fail/.test(c)) return 'failing';
+  if (c === 'timed_out') return 'timed out';
+  if (c === 'action_required') return 'waiting for approval';
+  return c.replace(/_/g, ' ');
+}
+
+/**
+ * Primary/secondary status wording shown next to each light on /status and /.
+ * The primary label says what an installer gets; the upstream CI result is secondary.
+ */
+function displayFor(m, light, rewrite) {
+  const state = light ? (light.lit ? 'lit' : 'dark') : 'unknown';
+  const ciUrl = light && /^https:\/\/github\.com\//.test(light.url || '') ? light.url : null;
+  const secondary = light ? `upstream build: ${ciWord(light.conclusion)}` : 'upstream build: unknown';
+  let label;
+  let tone;
+  if (rewrite === 'active') {
+    label = 'Fork available — download via patch-cloud';
+    tone = 'green';
+  } else if (rewrite === 'manual') {
+    label = 'Fork available (manual: fix waiting upstream)';
+    tone = 'green';
+  } else if (!m.npmName) {
+    label = state === 'lit' ? 'Upstream OK' : state === 'dark' ? 'Upstream build failing — not an npm rewrite target' : 'Upstream build status unknown';
+    tone = state === 'lit' ? 'ok' : state === 'dark' ? 'warn' : 'muted';
+  } else if (state === 'dark') {
+    label = 'Upstream build failing — no fork yet';
+    tone = 'warn';
+  } else if (state === 'lit') {
+    label = 'Upstream OK — normal npm';
+    tone = 'ok';
+  } else {
+    label = 'Upstream build status unknown — normal npm';
+    tone = 'muted';
+  }
+  return { label, tone, secondary, secondaryUrl: ciUrl };
+}
+
+function rewriteStateFor(m, light) {
+  const lit = light ? !!light.lit : null;
+  const dark = lit === false;
+  if (m.rewriteReady && m.npmName && dark) return 'active';
+  if (m.rewriteReady && m.npmName && hasManual(m)) return 'manual';
+  if (dark && m.npmName && !m.rewriteReady) return 'would rewrite';
+  if (m.rewriteReady && m.npmName) return 'ready';
+  return 'n/a';
+}
+
 function publicStatusPayload() {
   const mapping = loadMapping();
   const lights = loadLightsSync();
@@ -490,42 +740,52 @@ function publicStatusPayload() {
   for (const [repo, m] of Object.entries(mapping)) {
     const light = lightFor(repo, lights);
     const lit = light ? !!light.lit : null;
-    const dark = lit === false;
-    const rewrite =
-      m.rewriteReady && m.npmName && dark
-        ? 'active'
-        : dark && m.npmName && !m.rewriteReady
-          ? 'would rewrite'
-          : m.rewriteReady && m.npmName
-            ? 'ready'
-            : 'n/a';
+    const rewrite = rewriteStateFor(m, light);
     packages.push({
       repo,
       npmName: m.npmName || null,
+      version: m.npmName && m.rewriteReady ? m.version || null : null,
       light: {
         state: lit === true ? 'lit' : lit === false ? 'dark' : 'unknown',
         conclusion: light?.conclusion ?? 'unknown',
+        ci: light ? ciWord(light.conclusion) : 'unknown',
+        url: light && /^https:\/\/github\.com\//.test(light.url || '') ? light.url : null,
         fetchedAt: light?.fetchedAt ?? null,
       },
+      status: displayFor(m, light, rewrite),
       rewrite,
+      manual: hasManual(m)
+        ? { label: 'manual: fix available', reason: publicText(m.manualRewrite.reason), since: m.manualRewrite.since || null, servingNow: rewrite === 'manual' }
+        : null,
       fork: forkPublic(m),
       upstream: upstreamPublic(m, ups[repo]),
       note: publicNote(m),
       downloads: m.npmName ? downloadsFor(m.npmName) : null,
     });
   }
+  const count = (f) => packages.filter(f).length;
   return {
     service: 'patch-cloud',
     registry: reg,
     publicUrl: PUBLIC_URL || null,
     lightsCachedAt: lightsCache.at ? new Date(lightsCache.at).toISOString() : null,
     lightsCacheMinutes: LIGHTS_CACHE_MINUTES,
+    counts: {
+      rewriteActive: count((p) => p.rewrite === 'active'),
+      manual: count((p) => p.rewrite === 'manual'),
+      ready: count((p) => p.rewrite === 'ready'),
+      wouldRewrite: count((p) => p.rewrite === 'would rewrite'),
+      dark: count((p) => p.light.state === 'dark'),
+      lit: count((p) => p.light.state === 'lit'),
+      unknown: count((p) => p.light.state === 'unknown'),
+    },
     downloads: downloadsSummary(),
     packages,
     legend: {
-      lit: 'CI success → pass through / serve upstream',
-      dark: 'CI failure → rewrite to fork when packaged',
-      rewrite: 'active = serving fork now · ready = packaged, light lit · would rewrite = dark but no fork packaged · n/a = not an npm rewrite target',
+      lit: 'Upstream OK — normal npm (CI passing → proxied / upstream)',
+      dark: 'Upstream build failing → fork served when one is packaged',
+      manual: 'Fork available (manual: fix waiting upstream) — labeled override; the CI light is shown as-is and is never faked',
+      rewrite: 'active = serving fork now (light dark) · manual = serving fork via the labeled manual switch (light lit) · ready = packaged, light lit → upstream · would rewrite = dark but no fork packaged · n/a = not an npm rewrite target',
     },
     optIn: {
       install: `npm install <pkg> --registry ${reg}`,
@@ -549,6 +809,9 @@ function statusPayloadVerbose() {
     packages.push({
       repo,
       npmName: m.npmName,
+      rewrite: rewriteStateFor(m, light),
+      manualRewrite: m.manualRewrite || null,
+      status: displayFor(m, light, rewriteStateFor(m, light)),
       lit,
       conclusion: light?.conclusion ?? 'unknown',
       lightSource: light?.source ?? 'none',
@@ -720,24 +983,31 @@ function sendFile(res, absPath, headers = {}) {
   createReadStream(absPath).pipe(res);
 }
 
+const TONE_COLOR = { green: '#3fb950', ok: '#8b949e', warn: '#d29922', muted: '#8b949e' };
+function statusCellHtml(p) {
+  const st = p.status;
+  const color = TONE_COLOR[st.tone] || '#8b949e';
+  const primary = st.tone === 'green' ? `<b style="color:${color}">${escapeHtml(st.label)}</b>` : `<span style="color:${color}">${escapeHtml(st.label)}</span>`;
+  const sec = st.secondaryUrl
+    ? `<a href="${escapeHtml(st.secondaryUrl)}" target="_blank" rel="noopener">${escapeHtml(st.secondary)}</a>`
+    : escapeHtml(st.secondary);
+  const manual = p.manual
+    ? `<br><small style="color:#d2a8ff">manual: fix available${p.manual.reason ? ` — ${escapeHtml(p.manual.reason)}` : ''}${p.manual.since ? ` (since ${escapeHtml(p.manual.since)})` : ''}</small>`
+    : '';
+  return `${primary}<br><small>${sec}${p.light.fetchedAt ? ` · checked ${escapeHtml(p.light.fetchedAt)}` : ''}</small>${manual}`;
+}
+
 function htmlLanding(status) {
   const active = status.packages.filter((p) => p.rewrite === 'active');
-  const ready = status.packages.filter((p) => p.npmName && (p.rewrite === 'active' || p.rewrite === 'ready'));
+  const manual = status.packages.filter((p) => p.rewrite === 'manual');
+  const ready = status.packages.filter((p) => p.npmName && ['active', 'manual', 'ready'].includes(p.rewrite));
   const rows = status.packages
     .filter((p) => p.npmName)
     .map((p) => {
-      const lamp = p.light.state === 'lit' ? '● lit' : p.light.state === 'dark' ? '○ dark' : '? unknown';
-      const rw =
-        p.rewrite === 'active'
-          ? '<b style="color:#6f6">REWRITE ACTIVE</b>'
-          : p.rewrite === 'ready'
-            ? 'ready (light lit → upstream)'
-            : 'not packaged';
       return `<tr>
         <td><code>${escapeHtml(p.repo)}</code></td>
         <td><code>${escapeHtml(p.npmName)}</code></td>
-        <td>${lamp}</td>
-        <td>${rw}</td>
+        <td>${statusCellHtml(p)}</td>
         <td><small>${escapeHtml(p.note || '')}</small></td>
       </tr>`;
     })
@@ -763,13 +1033,14 @@ function htmlLanding(status) {
   .ok{color:var(--ok)}
 </style></head><body><main>
   <h1>patch-cloud</h1>
-  <p>Opt-in npm-compatible registry. When a mapped package's CI light is <b>dark</b>, installs get an annotated fork under the <em>same package name</em>. When <b>lit</b>, traffic is proxied to <code>registry.npmjs.org</code>.</p>
+  <p>Opt-in npm-compatible registry. When a mapped package's upstream build is failing (light <b>dark</b>) and a fixed fork is packaged, installs get the fork under the <em>same package name</em>. When upstream is OK (light <b>lit</b>), traffic is proxied to <code>registry.npmjs.org</code>. A package can also carry a clearly labeled <b>manual: fix available</b> switch that serves the fork while the light stays lit — the light is never faked.</p>
 
   <div class="card warn">
     <strong>Safety / opt-in only</strong>
     <ul>
       <li>You must point npm at this host explicitly (<code>--registry</code> or project <code>.npmrc</code>). It is never the default.</li>
-      <li>Only packages listed below with <em>rewrite ready</em> are ever rewritten — and only while their light is dark.</li>
+      <li>Only packages listed below with a packaged fork are ever rewritten — while their light is dark, or while they carry the labeled <em>manual: fix available</em> switch.</li>
+      <li>Only the fork's version is replaced; every other version of the package still comes from the public registry.</li>
       <li>Everything else (including scoped packages like <code>@types/node</code>) is proxied unchanged to the public registry.</li>
       <li>Publish is disabled (PUT/POST/DELETE → 405). This registry is read-only; only npm's audit POSTs are proxied to the public registry.</li>
       <li><strong>Lockfiles:</strong> rewritten tarballs have different integrity hashes. Existing <code>package-lock.json</code> / <code>npm ci</code> will fail until you regenerate the lockfile while opted in — or opt out and use upstream.</li>
@@ -788,12 +1059,13 @@ function htmlLanding(status) {
   <h2>Status</h2>
   <p>
     <span class="pill">${active.length} rewrite active</span>
-    <span class="pill">${ready.length} rewrite ready</span>
+    <span class="pill">${manual.length} manual: fix available</span>
+    <span class="pill">${ready.length} forks packaged</span>
     <a href="/status">/status</a> ·
     <a href="/health">/health</a>
   </p>
   <table>
-    <tr><th>Light repo</th><th>npm</th><th>Light</th><th>Rewrite</th><th>Note</th></tr>
+    <tr><th>Light repo</th><th>npm</th><th>Status</th><th>Note</th></tr>
     ${rows}
   </table>
 
@@ -804,7 +1076,7 @@ function htmlLanding(status) {
       .map(
         (p) =>
           `<li><code>${escapeHtml(p.npmName)}</code> ← <code>${escapeHtml(p.repo)}</code>${
-            p.rewrite === 'active' ? ' <span class="ok">(active now)</span>' : ''
+            p.rewrite === 'active' ? ' <span class="ok">(active now)</span>' : p.rewrite === 'manual' ? ' <span class="ok">(active now — manual: fix available)</span>' : ''
           }</li>`,
       )
       .join('') || '<li>(none)</li>'}
@@ -825,9 +1097,11 @@ function escapeHtml(s) {
 function htmlStatusVerbose(status) {
   const rows = status.packages
     .map((p) => {
-      const lamp = p.lit === true ? '● lit' : p.lit === false ? '○ dark' : '? unknown';
+      const lamp = `${p.lit === true ? '● lit' : p.lit === false ? '○ dark' : '? unknown'} — ${escapeHtml(p.status.label)}`;
       const rw = p.rewriteActive
         ? '<b style="color:#0a0">REWRITE ACTIVE → fork</b>'
+        : p.rewrite === 'manual'
+          ? '<b style="color:#0a0">MANUAL: FIX AVAILABLE → fork</b>'
         : p.wouldRewrite
           ? `<span style="color:#a60">${escapeHtml(p.wouldRewrite)}</span>`
           : p.rewriteReady
@@ -836,7 +1110,7 @@ function htmlStatusVerbose(status) {
       return `<tr>
         <td><code>${p.repo}</code></td>
         <td>${p.npmName ? `<code>${p.npmName}</code>` : '—'}</td>
-        <td>${lamp} <small>(${p.conclusion})</small></td>
+        <td>${lamp} <small>(upstream build: ${escapeHtml(ciWord(p.conclusion))})</small></td>
         <td>${rw}</td>
         <td><small>${escapeHtml(p.note || '')}</small></td>
         <td><small>${
@@ -878,8 +1152,8 @@ function downloadsLine(d) {
   if (!d) return '';
   const t = d.total;
   const o = d.other || { metadata: 0, upstream: 0 };
-  return `<p class="dl"><b>Downloads:</b> ${t.tarballs} tarballs (fork ${t.fork} · upstream ${t.upstream}) · metadata ${t.metadata}
-  · last 24h: fork ${d.last24h.fork} · upstream ${d.last24h.upstream} · metadata ${d.last24h.metadata}
+  return `<p class="dl"><b>Downloads:</b> ${t.tarballs} tarballs (fork ${t.fork} · upstream ${t.upstream}) · manual switch ${t.manual || 0} · metadata ${t.metadata}
+  · last 24h: fork ${d.last24h.fork} · manual ${d.last24h.manual || 0} · upstream ${d.last24h.upstream} · metadata ${d.last24h.metadata}
   <br><small>${d.persistent ? `since ${escapeHtml(d.since)}` : escapeHtml(d.note)} · unmapped packages (proxied): ${o.upstream} tarballs · ${o.metadata} metadata · all requests counted, incl. our own tests; /, /status, /health excluded; no IPs stored</small></p>`;
 }
 
@@ -888,20 +1162,16 @@ function htmlStatusPublic(status) {
     `<a href="${escapeHtml(href)}" target="_blank" rel="noopener">${escapeHtml(text)}</a>`;
   const rows = status.packages
     .map((p) => {
-      const lamp =
-        p.light.state === 'lit'
-          ? '<span style="color:#3fb950">● lit</span>'
-          : p.light.state === 'dark'
-            ? '<span style="color:#f85149">○ dark</span>'
-            : '? unknown';
       const rw =
         p.rewrite === 'active'
           ? '<b style="color:#3fb950">active → fork</b>'
-          : p.rewrite === 'would rewrite'
-            ? '<span style="color:#d29922">would rewrite (no fork packaged)</span>'
-            : p.rewrite === 'ready'
-              ? 'ready (light lit → upstream)'
-              : 'n/a';
+          : p.rewrite === 'manual'
+            ? '<b style="color:#3fb950">manual → fork</b>'
+            : p.rewrite === 'would rewrite'
+              ? '<span style="color:#d29922">would rewrite (no fork packaged)</span>'
+              : p.rewrite === 'ready'
+                ? 'ready (upstream OK → normal npm)'
+                : 'n/a';
       const fork = p.fork
         ? link(p.fork.url, p.fork.repo) + (p.fork.branch ? ` @ ${link(p.fork.branchUrl, p.fork.branch)}` : '')
         : '—';
@@ -910,14 +1180,12 @@ function htmlStatusPublic(status) {
           `<b style="color:#fc6">${escapeHtml(p.upstream.label)}</b> <small>(${escapeHtml(p.upstream.state)})</small>`
         : '—';
       const dl = p.downloads
-        ? `fork ${p.downloads.fork} · upstream ${p.downloads.upstream}<br><small>metadata ${p.downloads.metadata} · 24h: fork ${p.downloads.last24h.fork} · upstream ${p.downloads.last24h.upstream}</small>`
+        ? `fork ${p.downloads.fork} · upstream ${p.downloads.upstream}${p.downloads.manual ? ` · manual ${p.downloads.manual}` : ''}<br><small>metadata ${p.downloads.metadata} · 24h: fork ${p.downloads.last24h.fork} · upstream ${p.downloads.last24h.upstream}</small>`
         : '—';
       return `<tr>
         <td><code>${escapeHtml(p.repo)}</code></td>
         <td>${p.npmName ? `<code>${escapeHtml(p.npmName)}</code>` : '—'}</td>
-        <td>${lamp} <small>(${escapeHtml(p.light.conclusion)})</small>${
-          p.light.fetchedAt ? `<br><small>${escapeHtml(p.light.fetchedAt)}</small>` : ''
-        }</td>
+        <td>${statusCellHtml(p)}</td>
         <td>${rw}</td>
         <td>${dl}</td>
         <td><small>${fork}</small></td>
@@ -932,16 +1200,21 @@ function htmlStatusPublic(status) {
     body{font-family:system-ui,sans-serif;margin:2rem;background:#111;color:#eee}
     table{border-collapse:collapse;width:100%;font-size:.9rem} th,td{border:1px solid #444;padding:.5rem;text-align:left;vertical-align:top}
     th{background:#222} a{color:#6af} code{color:#9f9}
+    .pill{display:inline-block;padding:.15rem .55rem;border-radius:999px;background:#222;font-size:.8rem;margin-right:.3rem}
   </style></head><body>
   <h1>patch-cloud status</h1>
   <p>Registry: <code>${escapeHtml(status.registry)}</code>
   · <a href="/">landing</a> · <a href="/status?format=json">JSON</a> · <a href="/health">/health</a></p>
+  <p><span class="pill">${status.counts.rewriteActive} fork available (upstream build failing)</span>
+  <span class="pill">${status.counts.manual} fork available (manual: fix waiting upstream)</span>
+  <span class="pill">${status.counts.ready} fork packaged, upstream OK</span>
+  <span class="pill">${status.counts.wouldRewrite} upstream failing, no fork yet</span></p>
   ${downloadsLine(status.downloads)}
   <table>
-    <tr><th>Light repo</th><th>npm name</th><th>Light</th><th>Rewrite</th><th>Downloads</th><th>Fork</th><th>Upstream</th><th>Note</th></tr>
+    <tr><th>Light repo</th><th>npm name</th><th>Status</th><th>Rewrite</th><th>Downloads</th><th>Fork</th><th>Upstream</th><th>Note</th></tr>
     ${rows}
   </table>
-  <p><small>Active-low: lit = CI success, dark = CI failure. Lights cache ${escapeHtml(status.lightsCacheMinutes)} min.</small></p>
+  <p><small>Lights are active-low: lit = upstream build passing, dark = upstream build failing. The manual switch never changes a light. Lights cache ${escapeHtml(status.lightsCacheMinutes)} min.</small></p>
   </body></html>`;
 }
 
@@ -1067,7 +1340,19 @@ const server = http.createServer(async (req, res) => {
       await ensureLights();
       const lights = loadLightsSync();
       const light = lightFor(mapped.repo, lights);
-      const dark = light && !light.lit;
+      const { mode } = rewriteMode(mapped, light);
+      const dark = mode === 'fork';
+      const forkFile = `${tarballFileName(npmName, mapped.version || '1.0.0')}`;
+      if ((mode === 'fork' || mode === 'manual') && `${tarballMatch[2]}.tgz` !== forkFile && mapped.upstreamProxy) {
+        // another version of a rewritten package → upstream tarball
+        return proxyNpm(req, res, pathRaw + u.search, { npmName, kind: 'upstream', mapped });
+      }
+      if (mode === 'manual') {
+        const abs = join(ROOT, mapped.forkTarball || '');
+        if (!mapped.forkTarball || !existsSync(abs)) return sendJson(res, 404, { error: 'tarball missing', npmName, manual: true });
+        countHit(npmName, 'manual', mapped);
+        return sendFile(res, abs, { 'X-Patch-Cloud': 'manual', 'X-Patch-Cloud-Light': 'lit' });
+      }
       const rel = resolveTarballRel(mapped, dark);
       if (!rel) {
         // lit + upstreamProxy (or missing local upstream): proxy tarball path
@@ -1100,32 +1385,19 @@ const server = http.createServer(async (req, res) => {
       await ensureLights();
       const lights = loadLightsSync();
       const light = lightFor(mapped.repo, lights);
-      const dark = light && !light.lit;
+      const { mode } = rewriteMode(mapped, light);
       const version = mapped.version || '1.0.0';
 
-      if (dark) {
+      if (mode === 'fork' || mode === 'manual') {
         if (!mapped.forkTarball || !existsSync(join(ROOT, mapped.forkTarball))) {
           return sendJson(res, 404, { error: 'fork tarball missing', npmName });
         }
-        const meta = packageMeta(
-          req,
-          npmName,
-          version,
-          mapped.forkTarball,
-          `FORK / annotated — rewrite active (light dark). ${publicNote(mapped) || ''}`,
-          {
-            _patchCloud: {
-              rewrite: true,
-              source: 'fork',
-              lightRepo: mapped.repo,
-              fork: mapped.forkRepo || null,
-              branch: mapped.forkBranch || null,
-              pr: mapped.ciPatch?.upstreamUrl || null,
-            },
-          },
-        );
+        const meta = await rewrittenPackument(req, mapped, mode);
         countHit(npmName, 'metadata', mapped);
-        return sendJson(res, 200, meta, { 'X-Patch-Cloud': 'fork' });
+        return sendJson(res, 200, meta, {
+          'X-Patch-Cloud': mode,
+          'X-Patch-Cloud-Light': mode === 'fork' ? 'dark' : 'lit',
+        });
       }
 
       // lit
@@ -1196,4 +1468,8 @@ export {
   server,
   ensureLights,
   findMappingByNpmName,
+  lightRepos,
+  tarballManifest,
+  rewriteMode,
+  displayFor,
 };

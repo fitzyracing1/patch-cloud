@@ -8,7 +8,7 @@
     "upstreamDir": "upstream/broken-demo",
     "upstreamFallback": true,
     "rewriteReady": true,
-    "publicNote": "Demo package: light dark \u2192 fork, light lit \u2192 upstream."
+    "publicNote": "Demo package: light dark → fork, light lit → upstream."
   },
   "react/react": {
     "npmName": "react",
@@ -41,7 +41,8 @@
     "version": "16.4.0",
     "forkTarball": "tarballs/next-16.4.0-fork.tgz",
     "upstreamProxy": true,
-    "publicNote": "CI-only fix (Rspack test manifests). While dark, serves upstream next@16.4.0 annotated with fork/PR metadata (runtime identical to upstream); while lit, proxies registry.npmjs.org."
+    "publicNote": "CI-only fix (Rspack test manifests). While dark, serves upstream next@16.4.0 annotated with fork/PR metadata (runtime identical to upstream); while lit, proxies registry.npmjs.org.",
+    "mergeUpstream": false
   },
   "denoland/deno": {
     "npmName": null,
@@ -101,5 +102,113 @@
     "npmName": null,
     "rewriteReady": false,
     "note": "Light-computer demo repo; not an npm package."
+  },
+  "ZJONSSON/node-unzipper": {
+    "npmName": "unzipper",
+    "version": "0.12.5",
+    "rewriteReady": true,
+    "forkTarball": "tarballs/unzipper-0.12.5.tgz",
+    "forkRepo": "fitzyracing1/node-unzipper",
+    "forkBranch": "patch-cloud",
+    "upstreamRepo": "https://github.com/ZJONSSON/node-unzipper",
+    "upstreamUrl": "https://github.com/ZJONSSON/node-unzipper/pull/331",
+    "upstreamRole": "third-party",
+    "upstreamProxy": true,
+    "upstreamFallback": true,
+    "publicNote": "unzipper@0.12.5 with PR #331 by @zachstence: @aws-sdk/client-s3 moved to dependencies so Open.s3_v3 works after a normal install (issue #330). Trade-off: also installs the AWS SDK v3 S3 client. Light is dark from a Pages coverage-deploy job, not from this bug.",
+    "upstreamIssue": "https://github.com/ZJONSSON/node-unzipper/issues/330"
+  },
+  "jimp-dev/jimp": {
+    "npmName": "jimp",
+    "version": "1.6.1",
+    "rewriteReady": true,
+    "forkTarball": "tarballs/jimp-1.6.1.tgz",
+    "forkRepo": "fitzyracing1/jimp",
+    "forkBranch": "patch-cloud",
+    "upstreamRepo": "https://github.com/jimp-dev/jimp",
+    "upstreamUrl": "https://github.com/jimp-dev/jimp/issues/1402",
+    "upstreamRole": "third-party",
+    "upstreamProxy": true,
+    "upstreamFallback": true,
+    "publicNote": "jimp@1.6.1 with the real browser bundle: the npm release shipped a 98-byte stub at dist/browser/index.js, so bundlers using the \"browser\" condition got no exports (issue #1402). Fork fixes the turbo build order that caused it; Node builds are byte-identical to upstream."
+  },
+  "vercel/ms": {
+    "npmName": "ms",
+    "version": "2.1.3",
+    "rewriteReady": true,
+    "forkTarball": "tarballs/ms-2.1.3.tgz",
+    "forkRepo": "fitzyracing1/ms",
+    "forkBranch": "patch-cloud",
+    "upstreamRepo": "https://github.com/vercel/ms",
+    "upstreamUrl": "https://github.com/vercel/ms/pull/299",
+    "upstreamRole": "third-party",
+    "upstreamProxy": true,
+    "upstreamFallback": true,
+    "publicNote": "ms@2.1.3 where format() no longer emits scientific notation that parse() cannot read (ports PR #299 by @Pitchfork-and-Torch; issue #284), plus the opt-in decimal option from PR #125 by @almandsky. Ordinary output is unchanged. 2.1.3 already caps parse() input at 100 chars (the #291 ReDoS mitigation). Only ms@2.1.3 is replaced; other ms versions come from npm.",
+    "relatedPrs": [
+      "https://github.com/vercel/ms/pull/125"
+    ],
+    "upstreamIssue": "https://github.com/vercel/ms/issues/284"
+  },
+  "prebuild/prebuild-install": {
+    "npmName": "prebuild-install",
+    "version": "7.1.3",
+    "rewriteReady": true,
+    "forkTarball": "tarballs/prebuild-install-7.1.3.tgz",
+    "forkRepo": "fitzyracing1/prebuild-install",
+    "forkBranch": "patch-cloud",
+    "upstreamRepo": "https://github.com/prebuild/prebuild-install",
+    "upstreamUrl": "https://github.com/prebuild/prebuild-install/pull/214",
+    "upstreamRole": "third-party",
+    "upstreamProxy": true,
+    "upstreamFallback": true,
+    "publicNote": "prebuild-install@7.1.3 requiring tar-fs ^2.1.4 (PR #214 by @alichtman) so vulnerable tar-fs (CVE-2025-59343 / GHSA-vj76-c3g6-qr5v) cannot satisfy it, e.g. from a stale lockfile (issue #213).",
+    "upstreamIssue": "https://github.com/prebuild/prebuild-install/issues/213"
+  },
+  "ajv-validator/ajv": {
+    "npmName": "ajv",
+    "version": "6.15.0",
+    "rewriteReady": false,
+    "forkRepo": "fitzyracing1/ajv",
+    "forkBranch": "patch-cloud",
+    "upstreamRepo": "https://github.com/ajv-validator/ajv",
+    "upstreamUrl": "https://github.com/ajv-validator/ajv/pull/2591",
+    "upstreamRole": "third-party",
+    "upstreamProxy": true,
+    "upstreamFallback": true,
+    "publicNote": "Not rewritten. PR #2591 (v6 build script scripts/compile-dots.js) could not be verified as a ReDoS fix: the original regexes show no super-linear behaviour on adversarial input, and as written the PR changes the generated validator code. A corrected branch (output byte-identical to ajv@6.15.0) is on the fork for review; nothing is served.",
+    "notReadyReason": "ReDoS not reproducible; PR as written changes generated lib/dotjs output (fixed on fork branch)"
+  },
+  "cli-table/cli-table3": {
+    "npmName": "cli-table3",
+    "version": "0.6.5",
+    "rewriteReady": true,
+    "forkTarball": "tarballs/cli-table3-0.6.5.tgz",
+    "forkRepo": "fitzyracing1/cli-table3",
+    "forkBranch": "patch-cloud",
+    "upstreamRepo": "https://github.com/cli-table/cli-table3",
+    "upstreamUrl": "https://github.com/cli-table/cli-table3/pull/359",
+    "upstreamRole": "third-party",
+    "upstreamProxy": true,
+    "upstreamFallback": true,
+    "publicNote": "cli-table3@0.6.5 with PR #359 by @spokodev: a rowSpan past the last row is clamped instead of throwing \"Cannot read properties of undefined (reading 'length')\"."
+  },
+  "iamkun/dayjs": {
+    "npmName": "dayjs",
+    "version": "1.11.23",
+    "rewriteReady": true,
+    "forkTarball": "tarballs/dayjs-1.11.23.tgz",
+    "forkRepo": "fitzyracing1/dayjs",
+    "forkBranch": "patch-cloud",
+    "upstreamRepo": "https://github.com/iamkun/dayjs",
+    "upstreamUrl": "https://github.com/iamkun/dayjs/pull/2019",
+    "upstreamRole": "third-party",
+    "upstreamProxy": true,
+    "upstreamFallback": true,
+    "publicNote": "dayjs@1.11.23 with a cached Intl.DateTimeFormat in the timezone plugin (ports PR #2019 by @logeyG): .tz() about 5x faster, identical results. Upstream CI is green, so this is served via the labeled manual switch, not a dark light.",
+    "manualRewrite": {
+      "reason": "Upstream CI is green but the timezone-plugin performance fix (PR #2019, open since 2022) is unmerged; CI does not measure performance.",
+      "since": "2026-10-11"
+    }
   }
 }

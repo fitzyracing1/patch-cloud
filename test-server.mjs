@@ -14,6 +14,14 @@
  *    not counted, persisted to COUNTS_DIR/downloads.json across restart,
  *    in-memory fallback when COUNTS_DIR unset or unwritable
  *  - npm audit POST endpoints proxied (not 405); publish PUT/POST/DELETE still 405
+ *  - patch-cloud targets (unzipper, jimp, ms, prebuild-install, cli-table3): dark → fork
+ *    version merged into the upstream packument (other versions still resolvable),
+ *    full manifest (deps) from the fork tarball, PATCH-CLOUD.md + _patchCloud inside
+ *  - ajv: rewriteReady false → never rewritten, shown as "no fork yet"
+ *  - dayjs: labeled manual switch (issue #1) serves the fork while the light stays lit;
+ *    /status shows it distinctly and counts it separately; dark still wins when dark
+ *  - status wording: primary labels never use the bare word "failure"
+ *  - lights tracked live include every mapped GitHub repo
  */
 import { createServer } from 'node:net';
 import { spawn } from 'node:child_process';
@@ -235,6 +243,134 @@ try {
     const st = await (await fetch(`${base}/status`)).json();
     const rx = st.packages.find((p) => p.repo === 'react/react');
     ok('/status react dark + rewrite active', rx?.light?.state === 'dark' && rx?.rewrite === 'active', `${rx?.light?.state}/${rx?.rewrite}`);
+  }
+
+
+  // --- patch-cloud targets (bundled lights.json: all dark except iamkun/dayjs) ---
+  const mappingNow = JSON.parse(readFileSync(join(ROOT, 'mapping.json'), 'utf8'));
+  const TARGETS = [
+    ['ZJONSSON/node-unzipper', 'unzipper', (pj) => pj.dependencies?.['@aws-sdk/client-s3'] && !pj.devDependencies?.['@aws-sdk/client-s3']],
+    ['jimp-dev/jimp', 'jimp', (pj) => pj.dependencies?.['@jimp/core'] === '1.6.1'],
+    ['vercel/ms', 'ms', (pj) => !pj.dependencies],
+    ['prebuild/prebuild-install', 'prebuild-install', (pj) => pj.dependencies?.['tar-fs'] === '^2.1.4'],
+    ['cli-table/cli-table3', 'cli-table3', (pj) => !!pj.dependencies?.['string-width']],
+  ];
+  for (const [repo, name, depCheck] of TARGETS) {
+    const m = mappingNow[repo];
+    const ver = m.version;
+    const res = await fetch(`${base}/${name}`, { headers: { Accept: 'application/vnd.npm.install-v1+json; q=1.0, application/json; q=0.8' } });
+    const meta = await res.json();
+    ok(`${name} dark → fork header`, res.headers.get('x-patch-cloud') === 'fork' && res.headers.get('x-patch-cloud-light') === 'dark', res.headers.get('x-patch-cloud'));
+    const v = meta.versions?.[ver];
+    ok(`${name}@${ver} is the fork version`, v?._patchCloud?.source === 'fork' && v?._patchCloud?.fork === m.forkRepo && v?._patchCloud?.branch === 'patch-cloud', JSON.stringify(v?._patchCloud));
+    ok(`${name} other upstream versions still resolvable`, Object.keys(meta.versions || {}).length > 3 && meta._patchCloud?.replacedVersion === ver, String(Object.keys(meta.versions || {}).length));
+    const other = Object.keys(meta.versions).find((x) => x !== ver);
+    ok(`${name} other versions keep upstream tarballs`, /^https:\/\/registry\.npmjs\.org\//.test(meta.versions[other].dist.tarball) && !meta.versions[other]._patchCloud, meta.versions[other].dist.tarball);
+    ok(`${name} manifest deps come from fork tarball`, !!depCheck(v), JSON.stringify(v?.dependencies));
+    ok(`${name} dist points at patch-cloud`, v?.dist?.tarball?.startsWith(base) && /^sha512-/.test(v.dist.integrity));
+    const tb = await fetch(v.dist.tarball);
+    ok(`${name} tarball served from fork`, tb.ok && tb.headers.get('x-patch-cloud') === 'fork', String(tb.status));
+    const tmp = mkdtempSync(join(tmpdir(), 'pc-test-'));
+    writeFileSync(join(tmp, 't.tgz'), Buffer.from(await tb.arrayBuffer()));
+    execFileSync('tar', ['-xzf', join(tmp, 't.tgz'), '-C', tmp]);
+    const pj = JSON.parse(readFileSync(join(tmp, 'package', 'package.json'), 'utf8'));
+    ok(`${name} tarball has PATCH-CLOUD.md`, existsSync(join(tmp, 'package', 'PATCH-CLOUD.md')) && !/\/workspace|\/home\//.test(readFileSync(join(tmp, 'package', 'PATCH-CLOUD.md'), 'utf8')));
+    ok(`${name} tarball name/version unchanged + _patchCloud`, pj.name === name && pj.version === ver && pj._patchCloud?.fork === `https://github.com/${m.forkRepo}` && pj._patchCloud?.branch === 'patch-cloud', JSON.stringify(pj._patchCloud));
+    rmSync(tmp, { recursive: true, force: true });
+    const otherGet = await fetch(`${base}/${name}/-/${name}-${other}.tgz`);
+    ok(`${name}@${other} tarball proxied upstream (not the fork)`, otherGet.ok && otherGet.headers.get('x-patch-cloud') !== 'fork', `${otherGet.status} ${otherGet.headers.get('x-patch-cloud')}`);
+    await otherGet.arrayBuffer();
+  }
+  {
+    // jimp: the fork ships the real browser bundle, not the 98-byte stub
+    const meta = await (await fetch(`${base}/jimp`)).json();
+    const tb = await fetch(meta.versions['1.6.1'].dist.tarball);
+    const tmp = mkdtempSync(join(tmpdir(), 'pc-test-'));
+    writeFileSync(join(tmp, 'j.tgz'), Buffer.from(await tb.arrayBuffer()));
+    execFileSync('tar', ['-xzf', join(tmp, 'j.tgz'), '-C', tmp]);
+    const browser = readFileSync(join(tmp, 'package', 'dist', 'browser', 'index.js'), 'utf8');
+    ok('jimp fork dist/browser/index.js is the real bundle', browser.length > 100000 && !browser.includes('A stub. The real build is done by rollup'), String(browser.length));
+    rmSync(tmp, { recursive: true, force: true });
+  }
+  {
+    // ajv: fork exists but rewriteReady false → never rewritten
+    const res = await fetch(`${base}/ajv`, { headers: { Accept: 'application/vnd.npm.install-v1+json' } });
+    ok('ajv not rewritten (eligible-not-ready)', res.headers.get('x-patch-cloud') === 'eligible-not-ready', res.headers.get('x-patch-cloud'));
+    const meta = await res.json();
+    ok('ajv metadata is plain upstream', !meta._patchCloud && !meta.versions?.['6.15.0']?._patchCloud);
+  }
+  {
+    // dayjs: CI light LIT + labeled manual switch → fork, light never faked
+    const res = await fetch(`${base}/dayjs`);
+    const meta = await res.json();
+    ok('dayjs manual → header manual, light lit', res.headers.get('x-patch-cloud') === 'manual' && res.headers.get('x-patch-cloud-light') === 'lit', `${res.headers.get('x-patch-cloud')}/${res.headers.get('x-patch-cloud-light')}`);
+    const v = meta.versions?.['1.11.23'];
+    ok('dayjs manual _patchCloud.source = manual', v?._patchCloud?.source === 'manual' && v._patchCloud.manual?.label === 'manual: fix available' && !!v._patchCloud.manual.reason, JSON.stringify(v?._patchCloud));
+    ok('dayjs manual keeps other upstream versions', Object.keys(meta.versions).length > 50);
+    const before = (await pkgDl(base, 'iamkun/dayjs')) || {};
+    const tb = await fetch(v.dist.tarball);
+    ok('dayjs manual tarball header manual', tb.ok && tb.headers.get('x-patch-cloud') === 'manual' && tb.headers.get('x-patch-cloud-light') === 'lit');
+    const tmp = mkdtempSync(join(tmpdir(), 'pc-test-'));
+    writeFileSync(join(tmp, 'd.tgz'), Buffer.from(await tb.arrayBuffer()));
+    execFileSync('tar', ['-xzf', join(tmp, 'd.tgz'), '-C', tmp]);
+    ok('dayjs manual tarball has PATCH-CLOUD.md', existsSync(join(tmp, 'package', 'PATCH-CLOUD.md')));
+    rmSync(tmp, { recursive: true, force: true });
+    const after = await pkgDl(base, 'iamkun/dayjs');
+    ok('dayjs manual download counted as manual (not fork)', after.manual === (before.manual || 0) + 1 && after.fork === (before.fork || 0), JSON.stringify(after));
+    const st = await (await fetch(`${base}/status`)).json();
+    const dj = st.packages.find((p) => p.repo === 'iamkun/dayjs');
+    ok('/status dayjs light stays lit (not dark)', dj.light.state === 'lit' && dj.light.conclusion === 'success', JSON.stringify(dj.light));
+    ok('/status dayjs rewrite = manual', dj.rewrite === 'manual' && dj.manual?.label === 'manual: fix available' && dj.manual.servingNow === true && dj.manual.since === '2026-10-11', JSON.stringify(dj.manual));
+    ok('/status dayjs label', dj.status.label === 'Fork available (manual: fix waiting upstream)' && dj.status.tone === 'green' && dj.status.secondary === 'upstream build: passing', JSON.stringify(dj.status));
+    ok('/status counts manual separately', st.counts.manual === 1 && st.counts.rewriteActive >= 7 && st.packages.filter((p) => p.rewrite === 'active').length === st.counts.rewriteActive, JSON.stringify(st.counts));
+    ok('/status downloads total has manual', st.downloads.total.manual >= 1 && st.downloads.total.tarballs === st.downloads.total.fork + st.downloads.total.upstream + st.downloads.total.manual, JSON.stringify(st.downloads.total));
+    const sHtml = await (await fetch(`${base}/status`, { headers: { Accept: 'text/html' } })).text();
+    ok('/status HTML shows manual switch distinctly', sHtml.includes('Fork available (manual: fix waiting upstream)') && sHtml.includes('manual: fix available') && sHtml.includes('manual → fork'));
+    const land = await (await fetch(`${base}/`)).text();
+    ok('landing shows manual count', /1 manual: fix available/.test(land), (land.match(/\d+ manual[^<]*/) || [''])[0]);
+  }
+  {
+    // status wording (Joshua): primary label says what you get; CI result is secondary; no bare "failure"
+    const st = await (await fetch(`${base}/status`)).json();
+    const by = (r) => st.packages.find((p) => p.repo === r);
+    const uz = by('ZJONSSON/node-unzipper');
+    ok('dark + fork ready → "Fork available — download via patch-cloud"', uz.status.label === 'Fork available — download via patch-cloud' && uz.status.tone === 'green', JSON.stringify(uz.status));
+    ok('dark + fork ready → secondary "upstream build: failing" with link', uz.status.secondary === 'upstream build: failing' && /^https:\/\/github\.com\/ZJONSSON\/node-unzipper\/actions\/runs\//.test(uz.status.secondaryUrl || ''), JSON.stringify(uz.status));
+    const aj = by('ajv-validator/ajv');
+    ok('dark + no fork → "Upstream build failing — no fork yet"', aj.status.label === 'Upstream build failing — no fork yet' && aj.rewrite === 'would rewrite', JSON.stringify(aj.status));
+    ok('no primary/secondary label uses "failure"', st.packages.every((p) => !/failure/i.test(p.status.label + ' ' + p.status.secondary)), st.packages.map((p) => p.status.label).join(' | '));
+    const sHtml = await (await fetch(`${base}/status`, { headers: { Accept: 'text/html' } })).text();
+    const land = await (await fetch(`${base}/`)).text();
+    const visible = (h) => h.replace(/<[^>]+>/g, ' ');
+    ok('/status HTML has no visible "failure" / "(failure)"', !/failure/i.test(visible(sHtml)), (visible(sHtml).match(/.{30}failure.{30}/i) || [''])[0]);
+    ok('landing has no visible "failure"', !/failure/i.test(visible(land)));
+    ok('/status HTML dark+ready label + secondary link', sHtml.includes('Fork available — download via patch-cloud') && sHtml.includes('upstream build: failing</a>'));
+    for (const r of ['ZJONSSON/node-unzipper', 'jimp-dev/jimp', 'vercel/ms', 'prebuild/prebuild-install', 'ajv-validator/ajv', 'cli-table/cli-table3', 'iamkun/dayjs']) {
+      const p = by(r);
+      ok(`/status lists ${r} with a real light + fork link`, p && p.light.state !== 'unknown' && p.fork?.branch === 'patch-cloud' && /^https:\/\/github\.com\/fitzyracing1\//.test(p.fork.url) && /^https:\/\/github\.com\//.test(p.upstream?.url || ''), JSON.stringify(p && { l: p.light.state, f: p.fork, u: p.upstream }));
+    }
+    ok('third-party upstream PR labeled neutrally', /upstream fix PR/.test(uz.upstream.label) || /merged|closed/.test(uz.upstream.label), uz.upstream.label);
+  }
+  {
+    // lights tracked live: every mapped GitHub repo is refreshed (not just the 8 light-computer repos)
+    const mod = await import('./server.mjs');
+    const repos = mod.lightRepos();
+    const want = Object.keys(mappingNow).filter((r) => !r.startsWith('local/'));
+    ok('lightRepos() covers every mapped GitHub repo', want.every((r) => repos.includes(r)) && !repos.includes('local/broken-demo'), repos.join(','));
+    const lj = JSON.parse(readFileSync(join(ROOT, 'lights.json'), 'utf8')).map((l) => l.repo);
+    ok('bundled lights.json snapshot includes every mapped GitHub repo', want.every((r) => lj.includes(r)));
+    const pj = mod.tarballManifest('tarballs/unzipper-0.12.5.tgz');
+    ok('tarballManifest reads package.json from .tgz', pj?.name === 'unzipper' && pj.version === '0.12.5');
+    // manual switch semantics (pure): needs rewriteReady + reason; dark always wins; never touches the light
+    const lit = { lit: true, conclusion: 'success' };
+    const dark = { lit: false, conclusion: 'failure' };
+    const mm = { npmName: 'x', rewriteReady: true, manualRewrite: { reason: 'r', since: '2026-10-11' } };
+    ok('manual + lit → manual', mod.rewriteMode(mm, lit).mode === 'manual');
+    ok('manual + dark → fork (dark wins)', mod.rewriteMode(mm, dark).mode === 'fork');
+    ok('manual without rewriteReady → none', mod.rewriteMode({ ...mm, rewriteReady: false }, lit).mode === 'none');
+    ok('manual without reason → none', mod.rewriteMode({ ...mm, manualRewrite: { since: 'x' } }, lit).mode === 'none');
+    ok('manual does not mutate light', lit.lit === true && lit.conclusion === 'success');
+    ok('lit, no manual → "Upstream OK — normal npm"', mod.displayFor({ npmName: 'x', rewriteReady: true }, lit, 'ready').label === 'Upstream OK — normal npm');
   }
 
   // unmapped + scoped while server up

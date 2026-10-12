@@ -11,3 +11,7 @@ targets
 *.token
 RAILWAY-LOGIN.txt
 downloads.json
+forks-src
+prdiffs
+fork-specs
+repros

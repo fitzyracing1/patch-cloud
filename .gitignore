@@ -23,3 +23,7 @@ state.json
 tarballs/next-*.tgz
 *.bak
 *.backup
+
+# fork checkouts / PR diffs (fork sources live on GitHub under fitzyracing1/*@patch-cloud)
+forks-src/
+prdiffs/

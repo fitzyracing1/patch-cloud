@@ -1,0 +1,7 @@
+{"fork":"fitzyracing1/node-unzipper","branch":"patch-cloud","upstreamRepo":"ZJONSSON/node-unzipper",
+"upstreamPr":"https://github.com/ZJONSSON/node-unzipper/pull/331","upstreamIssue":"https://github.com/ZJONSSON/node-unzipper/issues/330",
+"baseRef":"aaf77f0 (unzipper@0.12.5 release commit)",
+"fix":"Move @aws-sdk/client-s3 from devDependencies to dependencies so Open.s3_v3 (and bundlers that statically resolve lib/Open/index.js) can find it after a normal install.",
+"credit":["@zachstence (PR #331 author; Co-authored-by in the fork commit)"],
+"changes":["package.json: added \"@aws-sdk/client-s3\": \"^3.620.0\" to dependencies; removed it from devDependencies. No source changes.","Trade-off: installing unzipper now also installs the AWS SDK v3 S3 client (and its dependencies)."],
+"verification":["Clean production install (no devDependencies): require.resolve('@aws-sdk/client-s3') from unzipper succeeds and unzipper.Open.s3_v3 reads a zip through a mocked S3 client; with upstream 0.12.5 it fails with \"Cannot find module '@aws-sdk/client-s3'\".","Upstream test suite (tap): 107 passing, 1 pending."]}

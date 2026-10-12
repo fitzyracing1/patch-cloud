@@ -13,6 +13,11 @@
  *                               (file paths, CI patch notes). Default off (public-safe).
  *   COUNTS_DIR                  dir for downloads.json (e.g. Railway volume /data); unset = in-memory
  *   COUNTS_FLUSH_MS             debounce for writing downloads.json (default 2000)
+ *   LIGHTS_REFRESH_MINUTES      min interval between GitHub lights refreshes (default: cache
+ *                               minutes with GITHUB_TOKEN, 20 without — stays under 60 req/h)
+ *   UPSTREAM_REFRESH_MINUTES    min interval between upstream PR/issue state checks
+ *                               (default 10 with GITHUB_TOKEN, 60 without)
+ *   PACKUMENT_CACHE_MINUTES     cache for upstream packuments merged into rewrites (default 5)
  */
 import { existsSync } from 'node:fs';
 import { join, dirname } from 'node:path';
@@ -38,3 +43,9 @@ export { ROOT };
 export const COUNTS_DIR = process.env.COUNTS_DIR || '';
 /** Debounce for flushing counts to disk (ms). */
 export const COUNTS_FLUSH_MS = Number(process.env.COUNTS_FLUSH_MS || 2000);
+/** Min minutes between GitHub Actions lights refreshes (unauthenticated API = 60 req/h/IP). */
+export const LIGHTS_REFRESH_MINUTES = Number(process.env.LIGHTS_REFRESH_MINUTES || (GITHUB_TOKEN ? LIGHTS_CACHE_MINUTES : 20));
+/** Min minutes between upstream PR/issue state checks. */
+export const UPSTREAM_REFRESH_MINUTES = Number(process.env.UPSTREAM_REFRESH_MINUTES || (GITHUB_TOKEN ? 10 : 60));
+/** Cache for upstream packuments that rewrites are merged into. */
+export const PACKUMENT_CACHE_MINUTES = Number(process.env.PACKUMENT_CACHE_MINUTES || 5);

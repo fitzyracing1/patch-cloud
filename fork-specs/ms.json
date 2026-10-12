@@ -1,0 +1,7 @@
+{"fork":"fitzyracing1/ms","branch":"patch-cloud","upstreamRepo":"vercel/ms",
+"upstreamPr":"https://github.com/vercel/ms/pull/299","upstreamIssue":"https://github.com/vercel/ms/issues/284",
+"baseRef":"tag 2.1.3",
+"fix":"format() no longer emits scientific notation (e.g. ms(1e30) gave '1.1574074074074075e+22d', ms(1e-7) gave '1e-7ms') that parse() cannot read back, so ms(ms(x)) round-trips. Also adds the opt-in `decimal` formatting option from PR #125.",
+"credit":["@Pitchfork-and-Torch (PR #299, round-trip fix; ported from TypeScript main to 2.1.3)","@almandsky (PR #125, decimal option)"],
+"changes":["index.js: new numberToDecimalString() expands exponent-form numbers to plain decimals (pure string manipulation, no Intl). Numbers that do not stringify in exponent form are returned unchanged, so ordinary output is byte-for-byte identical to 2.1.3.","index.js: optional `decimal` option (0-3 places, default 0 = unchanged output) from https://github.com/vercel/ms/pull/125.","parse() is unchanged, including its 100-character input cap (the mitigation proposed in https://github.com/vercel/ms/issues/291 is already present in 2.1.3). Outputs longer than 100 characters (e.g. ms(Number.MAX_VALUE)) still cannot be parsed back."],
+"verification":["Upstream mocha suite plus new tests: 69 passing.","Round-trip: ms(ms(1e30)) === 1e30 and ms(ms(1e-7)) === 1e-7 (upstream 2.1.3 returns undefined for both).","ReDoS timing: ms('9'.repeat(1000)+'z') and the worst case under the 100-char cap stay well under 1 ms per call."]}

@@ -1,0 +1,15 @@
+# keep the deploy upload small: fork sources (with node_modules) and research stay local
+forks-src/
+prdiffs/
+targets/
+fork-specs/
+repros/
+test-dark/
+test-lit/
+tmp-repack/
+node_modules/
+*.png
+*.token
+.env
+.env.*
+RAILWAY-LOGIN.txt
