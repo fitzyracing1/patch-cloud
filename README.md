@@ -27,6 +27,10 @@ JSON (`/status?format=json`) adds `packages[].dark`, `packages[].install`, `pack
 
 `node seed-lights.mjs` refreshes the bundled `lights.json` (with `darkSince`) before a deploy.
 
+## Light programs
+
+[light-programs](https://github.com/fitzyracing1/light-programs) reads this repo's `lights.json`, `mapping.json` and `watchlist.json` (plus the [light computer](https://github.com/fitzyracing1/light-computer)'s `state.json`) and prints suggested actions in plain words, such as the opt-in install line for a dark package with a ready fork. It's read-only, offline and suggest-only: `node cli.mjs --patch-cloud ../patch-cloud`.
+
 ## Idea
 
 1. The light computer fetches CI status for public repos into `lights.json` (● lit = upstream build passing, ○ dark = upstream build failing; active-low). The registry tracks the light computer's 8 repos **plus every GitHub repo in `mapping.json`**, refreshed live.
