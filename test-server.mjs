@@ -359,6 +359,33 @@ try {
     ok('watchlist present with repo links + summaries', wl && wl.entries.length >= 10 && wl.entries.every((e) => /^https:\/\/github\.com\//.test(e.repoUrl) && e.summary && e.dark.label && /fork/.test(e.fork)), wl && wl.entries.length);
     ok('watchlist never says "failure"', !/failure/i.test(JSON.stringify(wl)));
     ok('watchlist HTML rendered', sHtml.includes('id="watchlist"') && wl.entries.slice(0, 5).every((e) => sHtml.includes(e.repoUrl)));
+    // merged fixes (upstream PRs merged by maintainers; dark → lit upstream), from merged.json
+    const mg = st.merged;
+    const seed = JSON.parse(readFileSync(join(ROOT, 'merged.json'), 'utf8'));
+    const c = mg && mg.entries.find((e) => e.repo === 'cnpm/cnpmcore' && e.pr === 1161);
+    ok('merged: JSON section present, one entry per merged.json row', mg && mg.count === seed.length && mg.entries.length === seed.length, JSON.stringify(mg && mg.count));
+    ok('merged: lit-dark link', mg && mg.litDark === 'https://fitzyracing1.github.io/lit-dark/#merged');
+    ok('merged: cnpmcore #1161 facts', c && c.url === 'https://github.com/cnpm/cnpmcore/pull/1161' && c.title === 'ci: run test-mysql57-s3-nfs against a local S3Mock instead of the remote bucket' && c.mergedAt === '2026-10-12T04:05:45Z' && c.mergedBy === 'fengmk2' && c.mergedByUrl === 'https://github.com/fengmk2', JSON.stringify(c && { url: c.url, mergedAt: c.mergedAt, by: c.mergedBy }));
+    ok('merged: date shown in ET', c && c.mergedAtET === 'Oct 12, 2026, 12:05 AM ET', c && c.mergedAtET);
+    ok('merged: before = which light, since when, why', c && c.light === 'test-mysql57-s3-nfs' && c.before.light === 'dark' && c.before.sinceET === 'Apr 1, 2026' && /HTTP 530/.test(c.before.why), JSON.stringify(c && c.before.why));
+    ok('merged: before links a dark upstream run before the merge', c && c.before.run?.url === 'https://github.com/cnpm/cnpmcore/actions/runs/37601763270' && c.before.run.light === 'dark' && c.before.run.createdAt < c.mergedAt && c.before.run.jobsDark === 3, JSON.stringify(c && c.before.run && { u: c.before.run.url, d: c.before.run.jobsDark }));
+    ok('merged: fix in one plain sentence', c && /S3Mock/.test(c.fix || '') && (c.fix.match(/\.\s/g) || []).length === 0, c && c.fix);
+    ok('merged: after = first upstream run after merge, all light jobs lit', c && c.after.light === 'lit' && c.after.label === 'lit upstream now' && c.after.run?.url === 'https://github.com/cnpm/cnpmcore/actions/runs/38202391845' && c.after.run.createdAt >= c.mergedAt && c.after.run.jobsLit === 3 && c.after.run.jobs.length === 3 && c.after.run.jobs.every((j) => j.name.includes('test-mysql57-s3-nfs') && j.light === 'lit'), JSON.stringify(c && c.after.summary));
+    ok('merged: entries newest first', mg && mg.entries.every((e, i, a) => i === 0 || String(a[i - 1].mergedAt) >= String(e.mergedAt)));
+    ok('merged: JSON never says "failure"/"success"', !/failure|success/i.test(JSON.stringify(mg)));
+    const mi = sHtml.indexOf('id="merged"');
+    ok('merged HTML: section near the top (before "Dark now")', mi > 0 && mi < sHtml.indexOf('Dark now') && sHtml.includes('Merged fixes'), String(mi));
+    const mgHtml = mi > 0 ? sHtml.slice(mi, sHtml.indexOf('Dark now')) : '';
+    ok('merged HTML: repo, PR link, title, ET date, merged by', mgHtml.includes('href="https://github.com/cnpm/cnpmcore/pull/1161"') && mgHtml.includes('cnpm/cnpmcore#1161') && mgHtml.includes('local S3Mock instead of the remote bucket') && mgHtml.includes('Oct 12, 2026, 12:05 AM ET') && mgHtml.includes('href="https://github.com/fengmk2">@fengmk2'));
+    ok('merged HTML: Before / Fix / After', /Before:<\/b>.*was <b>dark<\/b> on master since Apr 1, 2026.*HTTP 530.*actions\/runs\/37601763270.*3 of 3 test-mysql57-s3-nfs jobs dark/s.test(mgHtml) && /Fix:<\/b>.*S3Mock/.test(mgHtml) && /After:<\/b> <b>lit upstream now\.<\/b>.*actions\/runs\/38202391845.*3 of 3 test-mysql57-s3-nfs jobs lit/s.test(mgHtml));
+    ok('merged HTML: links lit-dark #merged', mgHtml.includes('href="https://fitzyracing1.github.io/lit-dark/#merged"'));
+    ok('merged HTML: nav link + pill', sHtml.includes('href="#merged"') && /\d+ merged upstream · \d+ lit/.test(sHtml));
+    ok('merged HTML: only lit/dark vocabulary (no failure/success/passing/failing)', !/failure|success|passing|failing/i.test(visible(mgHtml)), (visible(mgHtml).match(/.{20}(failure|success|passing|failing).{20}/i) || [''])[0]);
+    ok('Dockerfile ships merged.json', /^COPY .*\bmerged\.json\b/m.test(readFileSync(join(ROOT, 'Dockerfile'), 'utf8')));
+    {
+      const run = (args) => { try { execFileSync(process.execPath, [join(ROOT, 'add-merged.mjs'), ...args], { stdio: 'pipe', env: { ...process.env, MERGED_FILE: join(tmpdir(), 'pc-merged-never.json') } }); return 0; } catch (e) { return e.status; } };
+      ok('add-merged.mjs: usage / bad args rejected without network', run([]) === 2 && run(['not a repo', '1']) === 1 && run(['cnpm/cnpmcore', 'abc']) === 1);
+    }
     ok('third-party upstream PR labeled neutrally', /upstream fix PR/.test(uz.upstream.label) || /merged|closed/.test(uz.upstream.label), uz.upstream.label);
   }
   {
@@ -474,6 +501,23 @@ try {
   // in-memory fallback: COUNTS_DIR unset, and COUNTS_DIR unwritable
   const notADir = join(COUNTS_TMP, 'not-a-dir');
   writeFileSync(notADir, 'x'); // COUNTS_DIR pointing at a file → ENOTDIR
+  {
+    // merged entry whose after-merge run is not lit yet → "waiting for upstream light", never "lit upstream now"
+    const seed = JSON.parse(readFileSync(join(ROOT, 'merged.json'), 'utf8'))[0];
+    const tmpMerged = join(COUNTS_TMP, 'merged-waiting.json');
+    writeFileSync(tmpMerged, JSON.stringify([
+      { ...seed, pr: 99991, litRun: { ...seed.litRun, state: 'dark', jobs: seed.litRun.jobs.map((j) => ({ ...j, light: 'dark' })) } },
+      { ...seed, pr: 99992, litRun: { state: 'waiting' } },
+    ]));
+    const pw = await freePort();
+    ({ child } = await startServer(pw, { MERGED_FILE: tmpMerged }));
+    const st = await (await fetch(`http://127.0.0.1:${pw}/status`)).json();
+    ok('merged waiting: after run dark → waiting', st.merged.entries.every((e) => e.after.light === 'waiting' && e.after.label === 'waiting for upstream light') && st.merged.litCount === 0, JSON.stringify(st.merged.entries.map((e) => e.after.light)));
+    const h = await (await fetch(`http://127.0.0.1:${pw}/status`, { headers: { Accept: 'text/html' } })).text();
+    const sec = h.slice(h.indexOf('id="merged"'), h.indexOf('Dark now'));
+    ok('merged waiting HTML: says "waiting for upstream light", never "lit upstream now"', sec.includes('waiting for upstream light') && !sec.includes('lit upstream now') && sec.includes('no upstream run has finished since the merge'));
+    await stop(child);
+  }
   for (const [label, dir] of [['unset', ''], ['unwritable', join(notADir, 'sub')]]) {
     const p = await freePort();
     ({ child } = await startServer(p, { COUNTS_DIR: dir }));

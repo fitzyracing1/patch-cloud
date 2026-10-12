@@ -1,0 +1,69 @@
+[
+  {
+    "repo": "cnpm/cnpmcore",
+    "pr": 1161,
+    "title": "ci: run test-mysql57-s3-nfs against a local S3Mock instead of the remote bucket",
+    "url": "https://github.com/cnpm/cnpmcore/pull/1161",
+    "mergedAt": "2026-10-12T04:05:45Z",
+    "mergedBy": "fengmk2",
+    "branch": "master",
+    "light": "test-mysql57-s3-nfs",
+    "darkSince": "2026-04-01T05:30:13Z",
+    "darkBefore": "The test-mysql57-s3-nfs job ran against a remote S3 bucket that answered every request with HTTP 530 (origin unreachable), so the job stayed dark on every master run.",
+    "fix": "The job now starts a local S3Mock container with the bucket pre-created and uses it instead of the remote bucket, plus a matching tweak to one download test.",
+    "darkRun": {
+      "id": 37601763270,
+      "url": "https://github.com/cnpm/cnpmcore/actions/runs/37601763270",
+      "workflow": "Node.js CI",
+      "branch": "master",
+      "headSha": "4cf7fdf690a838252a15733d7335e2b259b22171",
+      "createdAt": "2026-10-07T09:36:20Z",
+      "state": "dark",
+      "jobs": [
+        {
+          "name": "test-mysql57-s3-nfs (24, ubuntu-latest)",
+          "light": "dark",
+          "url": "https://github.com/cnpm/cnpmcore/actions/runs/37601763270/job/112727569660"
+        },
+        {
+          "name": "test-mysql57-s3-nfs (26, ubuntu-latest)",
+          "light": "dark",
+          "url": "https://github.com/cnpm/cnpmcore/actions/runs/37601763270/job/112727569843"
+        },
+        {
+          "name": "test-mysql57-s3-nfs (22, ubuntu-latest)",
+          "light": "dark",
+          "url": "https://github.com/cnpm/cnpmcore/actions/runs/37601763270/job/112727570069"
+        }
+      ]
+    },
+    "litRun": {
+      "id": 38202391845,
+      "url": "https://github.com/cnpm/cnpmcore/actions/runs/38202391845",
+      "workflow": "Node.js CI",
+      "branch": "master",
+      "headSha": "269ca4c7fe9179023da04705ffbecc4a2dfaa6b6",
+      "createdAt": "2026-10-12T04:05:48Z",
+      "state": "lit",
+      "jobs": [
+        {
+          "name": "test-mysql57-s3-nfs (26, ubuntu-latest)",
+          "light": "lit",
+          "url": "https://github.com/cnpm/cnpmcore/actions/runs/38202391845/job/114658399919"
+        },
+        {
+          "name": "test-mysql57-s3-nfs (22, ubuntu-latest)",
+          "light": "lit",
+          "url": "https://github.com/cnpm/cnpmcore/actions/runs/38202391845/job/114658400082"
+        },
+        {
+          "name": "test-mysql57-s3-nfs (24, ubuntu-latest)",
+          "light": "lit",
+          "url": "https://github.com/cnpm/cnpmcore/actions/runs/38202391845/job/114658400083"
+        }
+      ]
+    },
+    "verifiedAt": "2026-10-12T04:31:49Z",
+    "note": ""
+  }
+]

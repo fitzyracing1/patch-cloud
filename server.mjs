@@ -48,6 +48,8 @@ const LOCAL_LIGHTS = join(ROOT, 'local-lights.json');
 const MAPPING_FILE = join(ROOT, 'mapping.json');
 const UPSTREAM_STATUS_FILE = join(ROOT, 'upstream-status.json');
 const WATCHLIST_FILE = join(ROOT, 'watchlist.json');
+const MERGED_FILE = process.env.MERGED_FILE || join(ROOT, 'merged.json');
+const LIT_DARK_MERGED_URL = 'https://fitzyracing1.github.io/lit-dark/#merged';
 const UPSTREAM = 'https://registry.npmjs.org';
 const UA = 'patch-cloud/0.2 (+https://github.com/fitzyracing1)';
 
@@ -858,6 +860,98 @@ function watchlistPublic() {
   };
 }
 
+/** "2026-10-12T04:05:45Z" → "Oct 12, 2026, 12:05 AM ET" (America/New_York). */
+function formatET(iso) {
+  const t = Date.parse(iso || '');
+  if (!Number.isFinite(t)) return null;
+  const s = new Intl.DateTimeFormat('en-US', {
+    timeZone: 'America/New_York', year: 'numeric', month: 'short', day: 'numeric', hour: 'numeric', minute: '2-digit',
+  }).format(new Date(t));
+  return `${s} ET`;
+}
+
+/** "Oct 12, 2026" (America/New_York). */
+function formatDayET(iso) {
+  const t = Date.parse(iso || '');
+  if (!Number.isFinite(t)) return null;
+  return new Intl.DateTimeFormat('en-US', { timeZone: 'America/New_York', year: 'numeric', month: 'short', day: 'numeric' }).format(new Date(t));
+}
+
+const ghUrl = (u) => (/^https:\/\/github\.com\//.test(u || '') ? u : null);
+const LIGHT_WORD = (x) => (x === 'lit' || x === 'dark' ? x : 'waiting');
+
+/** One upstream run (before/after the merge) in public, lit/dark-only form. */
+function mergedRun(r) {
+  if (!r || !ghUrl(r.url)) return null;
+  const jobs = (Array.isArray(r.jobs) ? r.jobs : []).map((j) => ({ name: String(j.name || ''), light: LIGHT_WORD(j.light), url: ghUrl(j.url) }));
+  return {
+    id: r.id ?? null,
+    url: r.url,
+    workflow: publicText(r.workflow) || 'CI',
+    branch: r.branch || null,
+    createdAt: r.createdAt || null,
+    createdAtET: formatET(r.createdAt),
+    light: LIGHT_WORD(r.state),
+    jobs,
+    jobsLit: jobs.filter((j) => j.light === 'lit').length,
+    jobsDark: jobs.filter((j) => j.light === 'dark').length,
+  };
+}
+
+/** Upstream PRs merged by their maintainers that took a dark light to lit (merged.json, written by add-merged.mjs). */
+function mergedPublic() {
+  const raw = loadJson(MERGED_FILE, []);
+  const list = Array.isArray(raw) ? raw : [];
+  const entries = list
+    .filter((e) => e && /^[\w.-]+\/[\w.-]+$/.test(e.repo || '') && Number.isInteger(Number(e.pr)))
+    .map((e) => {
+      const darkRun = mergedRun(e.darkRun);
+      const litRun = mergedRun(e.litRun);
+      const isLit = !!litRun && litRun.light === 'lit';
+      const lightName = publicText(e.light) || 'CI';
+      const n = litRun ? litRun.jobs.length : 0;
+      return {
+        repo: e.repo,
+        repoUrl: `https://github.com/${e.repo}`,
+        pr: Number(e.pr),
+        url: ghUrl(e.url) || `https://github.com/${e.repo}/pull/${Number(e.pr)}`,
+        title: publicText(e.title) || '',
+        mergedAt: e.mergedAt || null,
+        mergedAtET: formatET(e.mergedAt),
+        mergedBy: e.mergedBy || null,
+        mergedByUrl: /^[\w-]+$/.test(e.mergedBy || '') ? `https://github.com/${e.mergedBy}` : null,
+        branch: e.branch || null,
+        light: lightName,
+        before: {
+          light: 'dark',
+          since: e.darkSince || null,
+          sinceET: formatDayET(e.darkSince),
+          why: publicText(e.darkBefore),
+          run: darkRun,
+        },
+        fix: publicText(e.fix),
+        after: {
+          light: isLit ? 'lit' : 'waiting',
+          label: isLit ? 'lit upstream now' : 'waiting for upstream light',
+          run: litRun,
+          summary: isLit
+            ? `First ${e.branch || 'default-branch'} run after the merge: ${litRun.workflow} ${litRun.id}${n ? `, ${litRun.jobsLit} of ${n} ${lightName} jobs lit` : ''}.`
+            : 'waiting for upstream light',
+        },
+        verifiedAt: e.verifiedAt || null,
+        note: publicText(e.note),
+      };
+    })
+    .sort((a, b) => String(b.mergedAt).localeCompare(String(a.mergedAt)));
+  return {
+    count: entries.length,
+    litCount: entries.filter((e) => e.after.light === 'lit').length,
+    litDark: LIT_DARK_MERGED_URL,
+    note: 'Upstream pull requests merged by each project’s maintainers that took a dark light to lit upstream. Before and after are upstream CI runs, checked with the GitHub API.',
+    entries,
+  };
+}
+
 function rewriteStateFor(m, light) {
   const lit = light ? !!light.lit : null;
   const dark = lit === false;
@@ -925,6 +1019,7 @@ function publicStatusPayload() {
     downloads: downloadsSummary(),
     packages,
     watchlist: watchlistPublic(),
+    merged: mergedPublic(),
     legend: {
       lit: 'Upstream OK — normal npm (CI passing → proxied / upstream)',
       dark: 'Upstream build failing → fork served when one is packaged',
@@ -1379,6 +1474,29 @@ function htmlStatusPublic(status) {
         <td><small style="color:#d29922">${escapeHtml(e.fork)}</small></td>
       </tr>`;
   };
+  const mg = status.merged;
+  const runLink = (r) => (r ? `<a href="${escapeHtml(r.url)}">${escapeHtml(r.workflow)} ${escapeHtml(r.id)}</a> (${escapeHtml(r.createdAtET || '')})` : '');
+  const mgItem = (e) => {
+    const b = e.before, a = e.after, dr = b.run, lr = a.run;
+    const lamp = a.light === 'lit' ? '<span class="lamp" aria-hidden="true">●</span> <b>lit</b>' : '<span class="lamp wait" aria-hidden="true">○</span> <b>waiting for upstream light</b>';
+    const beforeTxt = `<code>${escapeHtml(e.light)}</code> was <b>dark</b>${e.branch ? ` on ${escapeHtml(e.branch)}` : ''}${b.sinceET ? ` since ${escapeHtml(b.sinceET)}` : ''}. ${escapeHtml(b.why || '')}`
+      + (dr ? ` Dark run before the fix: ${runLink(dr)}${dr.jobs.length ? `, ${dr.jobsDark} of ${dr.jobs.length} ${escapeHtml(e.light)} jobs dark` : ''}.` : '');
+    const afterTxt = a.light === 'lit'
+      ? `<b>lit upstream now.</b> First ${escapeHtml(e.branch || 'default-branch')} run after the merge: ${runLink(lr)}${lr.jobs.length ? `, ${lr.jobsLit} of ${lr.jobs.length} ${escapeHtml(e.light)} jobs lit` : ''}.`
+      : `<b>waiting for upstream light</b>${lr ? ` — latest run after the merge: ${runLink(lr)}` : ' — no upstream run has finished since the merge'}.`;
+    return `<li class="mg-item">
+      <div>${lamp} <a href="${escapeHtml(e.url)}">${escapeHtml(e.repo)}#${escapeHtml(e.pr)}</a> — ${escapeHtml(e.title)}</div>
+      <div class="muted">repo <a href="${escapeHtml(e.repoUrl)}">${escapeHtml(e.repo)}</a> · merged <time datetime="${escapeHtml(e.mergedAt || '')}">${escapeHtml(e.mergedAtET || '—')}</time> by ${e.mergedByUrl ? `<a href="${escapeHtml(e.mergedByUrl)}">@${escapeHtml(e.mergedBy)}</a>` : escapeHtml(e.mergedBy || '—')}</div>
+      <div class="mg-step"><b>Before:</b> ${beforeTxt}</div>
+      <div class="mg-step"><b>Fix:</b> ${escapeHtml(e.fix || '—')}</div>
+      <div class="mg-step"><b>After:</b> ${afterTxt}</div>${e.note ? `\n      <div class="muted">${escapeHtml(e.note)}</div>` : ''}
+    </li>`;
+  };
+  const mgHtml = mg
+    ? `<h2 id="merged">Merged fixes — dark → lit upstream (${mg.count})</h2>
+  <p class="muted">${escapeHtml(mg.note)} Also on <a href="${escapeHtml(mg.litDark)}">lit-dark</a>.</p>
+  ${mg.entries.length ? `<ul class="mg">\n    ${mg.entries.map(mgItem).join('\n    ')}\n  </ul>` : '<p class="muted">None recorded yet.</p>'}`
+    : '';
   const wlHtml = wl
     ? `<h2 id="watchlist">Watchlist — popular packages with dark CI (${wl.entries.length} of ${escapeHtml(wl.totalDarkRepos)} dark repos)</h2>
   <p class="muted">${escapeHtml(wl.note)} Scan: ${escapeHtml((wl.scannedAt || '').slice(0, 10))}. ${escapeHtml(wl.darkDefinition || '')}. Numbers next to package names are ${escapeHtml(wl.downloadsNote || '')}.</p>
@@ -1397,15 +1515,18 @@ function htmlStatusPublic(status) {
     .muted{color:#aaa;font-size:.9rem}
     pre.one{margin:0;background:#1a1a1a;border:1px solid #333;border-radius:6px;padding:.35rem .5rem;white-space:pre-wrap;word-break:break-all;font-size:.8rem}
     .pill{display:inline-block;padding:.15rem .55rem;border-radius:999px;background:#222;font-size:.8rem;margin-right:.3rem}
+    ul.mg{list-style:none;padding:0;margin:0} .mg-item{border:1px solid #2f4a2f;background:#142014;border-radius:8px;padding:.6rem .8rem;margin:.5rem 0}
+    .mg-item>div{margin:.2rem 0} .lamp{color:#7f7} .lamp.wait{color:#aaa}
   </style></head><body>
   <h1>patch-cloud — dark lights board</h1>
   <p class="muted">A light is <b>dark</b> when the upstream project's latest CI build did not pass, and <b>lit</b> when it passed. A dark light is about the project's own tests, not your install: packages still download normally from npm. Where a fixed fork is packaged, patch-cloud can serve it under the same name if you opt in.</p>
   <p>Registry: <code>${escapeHtml(status.registry)}</code>
-  · <a href="/">landing</a> · <a href="/status?format=json">JSON</a> · <a href="/health">/health</a>${wl ? ' · <a href="#watchlist">watchlist</a>' : ''} · <a href="#all">all tracked lights</a></p>
+  · <a href="/">landing</a> · <a href="/status?format=json">JSON</a> · <a href="/health">/health</a>${mg ? ' · <a href="#merged">merged fixes</a>' : ''}${wl ? ' · <a href="#watchlist">watchlist</a>' : ''} · <a href="#all">all tracked lights</a></p>
   <p><span class="pill">${status.counts.rewriteActive} fork available (upstream build failing)</span>
   <span class="pill">${status.counts.manual} fork available (manual: fix waiting upstream)</span>
   <span class="pill">${status.counts.ready} fork packaged, upstream OK</span>
-  <span class="pill">${status.counts.wouldRewrite} upstream failing, no fork yet</span>${wl ? `<span class="pill">${wl.entries.length} on watchlist</span>` : ''}</p>
+  <span class="pill">${status.counts.wouldRewrite} upstream failing, no fork yet</span>${wl ? `<span class="pill">${wl.entries.length} on watchlist</span>` : ''}${mg ? `<span class="pill">${mg.count} merged upstream · ${mg.litCount} lit</span>` : ''}</p>
+  ${mgHtml}
 
   <h2>Dark now — tracked packages</h2>
   <p class="muted">Live lights (cached ${escapeHtml(status.lightsCacheMinutes)} min). "Days dark" counts from the first red run after the last passing one; "≥" means no passing run was in the window checked.</p>

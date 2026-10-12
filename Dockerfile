@@ -5,7 +5,7 @@ WORKDIR /app
 
 # App sources (tarballs/ may be large — next annotated package ~44MB)
 COPY package.json config.mjs server.mjs check-upstream.mjs mapping.json ./
-COPY lights.json upstream-status.json watchlist.json ./
+COPY lights.json upstream-status.json watchlist.json merged.json ./
 # Demo override: keeps local/broken-demo dark so the fork rewrite is visible
 COPY local-lights.example.json ./local-lights.json
 COPY tarballs/ ./tarballs/
