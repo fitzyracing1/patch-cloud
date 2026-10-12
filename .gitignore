@@ -1,0 +1,25 @@
+node_modules/
+test-lit/
+test-dark/
+tmp-repack/
+targets/
+
+# secrets / tokens
+.env
+.env.*
+*.token
+*token*
+!**/tokenizer*
+.railway/
+.railway-*
+RAILWAY-LOGIN.txt
+
+# local runtime state
+local-lights.json
+downloads.json
+state.json
+
+# large build artifacts (regenerate with `npm run pack:next`)
+tarballs/next-*.tgz
+*.bak
+*.backup

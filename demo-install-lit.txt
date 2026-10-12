@@ -1,0 +1,12 @@
+=== LIT install: expect UPSTREAM (broken) ===
+Time: Oct 11, 2026 6:47 PM ET
+> npm install broken-demo --registry http://127.0.0.1:4873
+
+added 1 package in 143ms
+
+=== package description ===
+UPSTREAM broken-demo — intentionally throws (simulates a broken package)
+
+=== require('broken-demo') — expect throw ===
+THREW as expected: broken-demo UPSTREAM: this package is broken (CI dark). Patch-cloud should have rewritten you to the fork.
+OK: upstream broken code ran (threw)

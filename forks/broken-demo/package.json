@@ -1,0 +1,7 @@
+{
+  "name": "broken-demo",
+  "version": "1.0.0",
+  "description": "FORK by fitzyracing1 — fixed broken-demo (patch-cloud rewrite)",
+  "main": "index.js",
+  "license": "MIT"
+}

@@ -1,0 +1,15 @@
+{
+  "name": "patch-cloud",
+  "version": "0.2.0",
+  "private": true,
+  "description": "Opt-in npm registry that rewrites dark-light deps to annotated forks",
+  "type": "module",
+  "scripts": {
+    "start": "node server.mjs",
+    "test": "node test-server.mjs",
+    "flip:dark": "node flip-light.mjs dark",
+    "flip:lit": "node flip-light.mjs lit",
+    "status": "curl -s http://127.0.0.1:4873/status",
+    "pack:next": "node pack-annotated.mjs next --fork fitzyracing1/next.js --branch rspack-manifest-fix --pr https://github.com/vercel/next.js/pull/100001"
+  }
+}

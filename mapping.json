@@ -1,0 +1,105 @@
+{
+  "local/broken-demo": {
+    "npmName": "broken-demo",
+    "version": "1.0.0",
+    "forkTarball": "tarballs/broken-demo-1.0.0-fork.tgz",
+    "upstreamTarball": "tarballs/broken-demo-1.0.0-upstream.tgz",
+    "forkDir": "forks/broken-demo",
+    "upstreamDir": "upstream/broken-demo",
+    "upstreamFallback": true,
+    "rewriteReady": true,
+    "publicNote": "Demo package: light dark \u2192 fork, light lit \u2192 upstream."
+  },
+  "react/react": {
+    "npmName": "react",
+    "upstreamFallback": true,
+    "rewriteReady": true,
+    "forkRepo": "fitzyracing1/react",
+    "forkBranch": "main",
+    "version": "19.3.0",
+    "forkTarball": "tarballs/react-19.3.0-fork.tgz",
+    "upstreamProxy": true,
+    "publicNote": "Annotated upstream react; no code changes yet. While dark, serves upstream react@19.3.0 annotated with fork metadata (runtime identical to upstream); while lit, proxies registry.npmjs.org."
+  },
+  "vercel/next.js": {
+    "npmName": "next",
+    "upstreamFallback": true,
+    "rewriteReady": true,
+    "ciPatch": {
+      "kind": "npm package (CI test-manifest patch; annotated upstream tarball)",
+      "state": "posted, waiting on maintainers",
+      "preparedAt": "2026-10-11T23:04:50.950Z",
+      "upstreamRun": "https://github.com/vercel/next.js/actions/runs/38094923448",
+      "upstreamRef": "canary d8c1c1b0002d (v16.5.0-canary.8)",
+      "summary": "Rspack test manifests: 163 failing React 18.3.1 cases marked failed + 2 flakey (bot from #94835 would normally do this).",
+      "upstreamUrl": "https://github.com/vercel/next.js/pull/100001",
+      "postedAt": "2026-10-11T23:08:00-04:00",
+      "postedAs": "PR #100001"
+    },
+    "forkRepo": "fitzyracing1/next.js",
+    "forkBranch": "rspack-manifest-fix",
+    "version": "16.4.0",
+    "forkTarball": "tarballs/next-16.4.0-fork.tgz",
+    "upstreamProxy": true,
+    "publicNote": "CI-only fix (Rspack test manifests). While dark, serves upstream next@16.4.0 annotated with fork/PR metadata (runtime identical to upstream); while lit, proxies registry.npmjs.org."
+  },
+  "denoland/deno": {
+    "npmName": null,
+    "upstreamFallback": false,
+    "rewriteReady": false,
+    "ciPatch": {
+      "kind": "CI patch",
+      "state": "issue filed; skip + cleanup PRs opened",
+      "preparedAt": "2026-10-11T23:04:50.950Z",
+      "upstreamRun": "https://github.com/denoland/deno/actions/runs/37514460953",
+      "upstreamRef": "main a18ce33715 (still HEAD)",
+      "summary": "macOS skips for 2 flaky http2 node_compat tests (#36141 regressed) + config cleanup of 3 nested duplicate entries under parallel/test-fs-rm.js.",
+      "upstreamUrl": "https://github.com/denoland/deno/issues/37009",
+      "prsOpened": true,
+      "postedAt": "2026-10-11T23:08:00-04:00",
+      "postedAs": "issue #37009 + PRs #37010 (macOS http2 skip) and #37011 (config cleanup)",
+      "prUrls": [
+        "https://github.com/denoland/deno/pull/37010",
+        "https://github.com/denoland/deno/pull/37011"
+      ],
+      "prsOpenedAt": "2026-10-11T20:24:00-04:00"
+    },
+    "publicNote": "Runtime binary, not an npm install target. CI fix tracked upstream in https://github.com/denoland/deno/issues/37009; fix PRs: https://github.com/denoland/deno/pull/37010 (skip flaky http2 tests on macOS) and https://github.com/denoland/deno/pull/37011 (node_compat config cleanup)."
+  },
+  "nodejs/node": {
+    "npmName": null,
+    "rewriteReady": false,
+    "ciPatch": {
+      "kind": "CI patch",
+      "state": "posted, waiting on maintainers",
+      "preparedAt": "2026-10-11T23:04:50.950Z",
+      "upstreamRun": "https://github.com/nodejs/node/actions/runs/38180315692",
+      "upstreamRef": "v24.22.0-proposal (PR #66667) @ a5d0eb95dd",
+      "summary": "Release-proposal linter: commit 66eafad642 (PR #65510, dont-land-on-v24.x) must be dropped from v24.x-staging by the releaser. Full scan: #65510 is the only violation.",
+      "upstreamUrl": "https://github.com/nodejs/node/pull/66667#issuecomment-6114930332",
+      "postedAt": "2026-10-11T23:08:00-04:00",
+      "postedAs": "comment on PR #66667"
+    },
+    "publicNote": "Not replaced via registry rewrite. Release-proposal CI fix proposed upstream."
+  },
+  "microsoft/vscode": {
+    "npmName": null,
+    "rewriteReady": false,
+    "note": "Not a typical npm install of the whole editor."
+  },
+  "rust-lang/rust": {
+    "npmName": null,
+    "rewriteReady": false,
+    "note": "Not an npm package."
+  },
+  "python/cpython": {
+    "npmName": null,
+    "rewriteReady": false,
+    "note": "Not an npm package."
+  },
+  "fitzyracing1/fakegreen": {
+    "npmName": null,
+    "rewriteReady": false,
+    "note": "Light-computer demo repo; not an npm package."
+  }
+}

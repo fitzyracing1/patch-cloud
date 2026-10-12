@@ -1,0 +1,41 @@
+{
+  "checkedAt": "2026-10-11T23:17:42.088Z",
+  "results": {
+    "vercel/next.js": {
+      "upstreamUrl": "https://github.com/vercel/next.js/pull/100001",
+      "kind": "pull",
+      "number": 100001,
+      "state": "open",
+      "merged": false,
+      "title": "ci: mark failing Rspack + React 18.3.1 cases as known in Rspack test manifests",
+      "html_url": "https://github.com/vercel/next.js/pull/100001",
+      "updated_at": "2026-10-11T23:09:25Z",
+      "checkedAt": "2026-10-11T23:17:42.088Z",
+      "error": null
+    },
+    "denoland/deno": {
+      "upstreamUrl": "https://github.com/denoland/deno/issues/37009",
+      "kind": "issue",
+      "number": 37009,
+      "state": "open",
+      "merged": false,
+      "title": "flaky: node_compat http2 tests on macOS again (regression of #36141)",
+      "html_url": "https://github.com/denoland/deno/issues/37009",
+      "updated_at": "2026-10-11T23:08:27Z",
+      "checkedAt": "2026-10-11T23:17:42.088Z",
+      "error": null
+    },
+    "nodejs/node": {
+      "upstreamUrl": "https://github.com/nodejs/node/pull/66667#issuecomment-6114930332",
+      "kind": "pull",
+      "number": 66667,
+      "state": "open",
+      "merged": false,
+      "title": "2026-10-14, Version 24.22.0 'Krypton' (LTS)",
+      "html_url": "https://github.com/nodejs/node/pull/66667",
+      "updated_at": "2026-10-11T23:12:05Z",
+      "checkedAt": "2026-10-11T23:17:42.088Z",
+      "error": null
+    }
+  }
+}

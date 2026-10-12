@@ -1,0 +1,16 @@
+=== DARK install: expect FORK ===
+Time: Oct 11, 2026 6:47 PM ET
+> npm install broken-demo --registry http://127.0.0.1:4873
+
+added 1 package in 138ms
+
+=== require('broken-demo') ===
+{
+  "ok": true,
+  "source": "fork",
+  "message": "Hello from fitzyracing1 fork of broken-demo — patch-cloud rewrite active"
+}
+OK: fork code ran
+
+=== package description ===
+FORK by fitzyracing1 — fixed broken-demo (patch-cloud rewrite)

@@ -1,0 +1,12 @@
+{
+  "local/broken-demo": {
+    "repo": "local/broken-demo",
+    "conclusion": "failure",
+    "workflow": "local-demo",
+    "url": "file:local-lights.json",
+    "lit": false,
+    "runAt": "2026-10-11T23:18:04.611Z",
+    "fetchedAt": "2026-10-11T23:18:04.611Z",
+    "source": "local-override"
+  }
+}

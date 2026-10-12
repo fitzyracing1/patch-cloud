@@ -1,0 +1,7 @@
+{
+  "name": "broken-demo",
+  "version": "1.0.0",
+  "description": "UPSTREAM broken-demo — intentionally throws (simulates a broken package)",
+  "main": "index.js",
+  "license": "MIT"
+}
