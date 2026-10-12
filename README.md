@@ -77,6 +77,8 @@ curl -s http://127.0.0.1:4873/status | jq .
 
 ### Demo: `broken-demo`
 
+Forces both light states on demand (`local/broken-demo`). See the public light specification and proof in [fitzyracing1/lit-dark](https://github.com/fitzyracing1/lit-dark) (active-low: lit = 0, dark = 1).
+
 ```bash
 node flip-light.mjs dark
 npm install broken-demo --registry http://127.0.0.1:4873
