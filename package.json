@@ -6,10 +6,13 @@
   "type": "module",
   "scripts": {
     "start": "node server.mjs",
-    "test": "node test-server.mjs",
+    "test": "node test-server.mjs && node --test test-light-core.mjs test-add-merged.mjs",
     "flip:dark": "node flip-light.mjs dark",
     "flip:lit": "node flip-light.mjs lit",
     "status": "curl -s http://127.0.0.1:4873/status",
     "pack:next": "node pack-annotated.mjs next --fork fitzyracing1/next.js --branch rspack-manifest-fix --pr https://github.com/vercel/next.js/pull/100001"
+  },
+  "dependencies": {
+    "@fitzyracing1/light-core": "git+https://github.com/fitzyracing1/light-core.git#v0.1.0"
   }
 }

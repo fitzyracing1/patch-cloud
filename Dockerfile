@@ -1,7 +1,15 @@
 # patch-cloud — read-only opt-in npm registry
+# deps: @fitzyracing1/light-core comes from a pinned git tag, so install it where git exists
+FROM node:22-bookworm-slim AS deps
+RUN apt-get update && apt-get install -y --no-install-recommends git ca-certificates && rm -rf /var/lib/apt/lists/*
+WORKDIR /app
+COPY package.json package-lock.json ./
+RUN npm ci --omit=dev --no-audit --no-fund
+
 FROM node:22-bookworm-slim
 
 WORKDIR /app
+COPY --from=deps /app/node_modules ./node_modules
 
 # App sources (tarballs/ may be large — next annotated package ~44MB)
 COPY package.json config.mjs server.mjs check-upstream.mjs mapping.json ./
