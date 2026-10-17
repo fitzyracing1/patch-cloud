@@ -1,0 +1,4 @@
+{
+  "note": "Requester ids the mirror bot will consider. Not on this list => refuse (dark).",
+  "requesters": ["josh-build-bot", "josh-laptop-bot"]
+}

@@ -1,0 +1,24 @@
+Local demo, 2026-10-17 ~2:09 PM EDT, real packages, registry.npmjs.org, live patch cloud /status.
+
+--- run 1
+[lit 0] OKAY dayjs@1.11.23 from josh-build-bot: package light is lit (patch-cloud: iamkun/dayjs conclusion=success)
+    download lit 0: /workspace/mirror-bot-downloads/dayjs-1.11.23.tgz (sha512-QDTCU0M0MxR3hQfnlDJf...)
+[lit 0] OKAY react@19.3.1 from josh-build-bot: package light is lit (patch-cloud: react/react conclusion=success)
+    download lit 0: /workspace/mirror-bot-downloads/react-19.3.1.tgz (sha512-QNhWdt7nrgVWWQG58QuG...)
+[dark 1] REFUSE ms@2.1.3 from josh-build-bot: package light is dark (patch-cloud: vercel/ms conclusion=failure)
+[dark 1] REFUSE ajv@8.20.0 from josh-laptop-bot: package light is dark (patch-cloud: ajv-validator/ajv conclusion=failure)
+[dark 1] REFUSE dayjs@1.11.23 from stranger-bot: requester "stranger-bot" not on allowlist
+[dark 1] REFUSE dayjs@1.11.23 from josh-build-bot: bad or missing HMAC signature
+[dark 1] REFUSE dayjs@^1.11.0 from josh-build-bot: version must be exact (x.y.z)
+overall: dark (1)
+
+--- run 2 (same signed dayjs request sent again)
+[dark 1] REFUSE dayjs@1.11.23 from josh-build-bot: nonce already used (replay)
+overall: dark (1)
+
+--- run 3 (packages not on patch cloud -> GitHub Actions light)
+[lit 0] OKAY chalk@6.0.1 from josh-build-bot: package light is lit (github-actions: chalk/chalk@main "CI" conclusion=success)
+    download lit 0: /workspace/mirror-bot-downloads/chalk-6.0.1.tgz (sha512-/Ce6KNm3vIbWdMlNna6R...)
+[lit 0] OKAY semver@7.8.5 from josh-build-bot: package light is lit (github-actions: npm/node-semver@main "CodeQL" conclusion=success)
+    download lit 0: /workspace/mirror-bot-downloads/semver-7.8.5.tgz (sha512-Y7/KDsb8LjooZpwaqGyu...)
+overall: lit (0)

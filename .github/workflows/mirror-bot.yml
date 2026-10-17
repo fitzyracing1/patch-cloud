@@ -1,0 +1,18 @@
+# Prototype CI for the mirror bot. Lives on try/mirror-bot only.
+name: mirror-bot
+on:
+  push:
+    branches: ['try/**']
+    paths: ['mirror-bot/**', '.github/workflows/mirror-bot.yml']
+  workflow_dispatch:
+permissions:
+  contents: read
+jobs:
+  test:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-node@v4
+        with:
+          node-version: 20
+      - run: node --test mirror-bot/mirror-bot.test.mjs
