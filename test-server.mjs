@@ -228,7 +228,22 @@ try {
     const meta = await res.json();
     const ver = JSON.parse(readFileSync(join(ROOT, 'mapping.json'), 'utf8'))['react/react'].version;
     ok('react dark → fork header', res.headers.get('x-patch-cloud') === 'fork', res.headers.get('x-patch-cloud'));
-    ok(`react dark serves ${ver}`, !!meta.versions?.[ver] && meta['dist-tags']?.latest === ver, JSON.stringify(meta['dist-tags']));
+    // The fork version is merged into the upstream packument and upstream dist-tags are kept
+    // (see rewrittenPackument), so `latest` tracks whatever npm says right now — derive it from
+    // upstream instead of pinning a live dist-tag. Only the single-version fallback (upstream
+    // unreachable) sets latest to the fork version.
+    const mergedUpstream = /^upstream/.test(meta._patchCloud?.otherVersions || '');
+    let expectedLatest = ver;
+    if (mergedUpstream) {
+      try {
+        const tags = await (await fetch('https://registry.npmjs.org/-/package/react/dist-tags')).json();
+        expectedLatest = tags.latest;
+      } catch {
+        expectedLatest = null; // npm unreachable from the test: latest must at least be a served version
+      }
+    }
+    const latestOk = expectedLatest ? meta['dist-tags']?.latest === expectedLatest : !!meta.versions?.[meta['dist-tags']?.latest];
+    ok(`react dark serves ${ver}`, !!meta.versions?.[ver] && meta._patchCloud?.replacedVersion === ver && latestOk, `latest=${meta['dist-tags']?.latest} expected=${expectedLatest ?? '(any served version)'}`);
     ok('react dark meta _patchCloud.fork', meta.versions?.[ver]?._patchCloud?.fork === 'fitzyracing1/react' && meta.versions[ver]._patchCloud.branch === 'main');
     const tb = await fetch(meta.versions[ver].dist.tarball);
     ok('react tarball fork header', tb.ok && tb.headers.get('x-patch-cloud') === 'fork', String(tb.status));
