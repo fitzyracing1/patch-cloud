@@ -81,6 +81,7 @@ async function startServer(port, extraEnv = {}) {
     LIGHTS_REFRESH: '0',
     RATE_LIMIT_PER_MIN: '0',
     STATUS_VERBOSE: '0',
+    UNMAPPED_LIGHTS: '0',
     LIGHTS_FILE: join(ROOT, 'lights.json'),
     ...extraEnv,
   };
@@ -150,12 +151,24 @@ try {
     await (await fetch(`${base}/left-pad`)).arrayBuffer();
     const d3 = await getDl(base);
     ok('unmapped metadata → other bucket', d3.other.metadata === 1 && d3.total.metadata === 2, JSON.stringify(d3.other));
+    const lp = d3.unmapped?.top?.find((t) => t.name === 'left-pad');
+    ok('unmapped per-name: left-pad metadata 1 (total + 24h)', lp?.metadata === 1 && lp.upstream === 0 && lp.last24h.metadata === 1 && d3.unmapped.tracked === 1, JSON.stringify(d3.unmapped));
+    ok('unmapped per-name excludes mapped packages', !d3.unmapped.top.some((t) => t.name === 'broken-demo'));
+    const lpMeta = await (await fetch(`${base}/left-pad`)).json();
+    await (await fetch(lpMeta.versions['1.3.0'].dist.tarball.replace('https://registry.npmjs.org', base))).arrayBuffer();
+    const d3b = await getDl(base);
+    const lp2 = d3b.unmapped.top.find((t) => t.name === 'left-pad');
+    ok('unmapped per-name: left-pad tarball counted upstream', lp2?.metadata === 2 && lp2.upstream === 1 && lp2.last24h.upstream === 1, JSON.stringify(lp2));
+    ok('aggregate other unchanged alongside per-name', d3b.other.metadata === 2 && d3b.other.upstream === 1, JSON.stringify(d3b.other));
+    ok('unmapped light unknown when lookups disabled', lp2.light.state === 'unknown' && lp2.forkCandidate === false);
     const sHtml = await (await fetch(`${base}/status`, { headers: { Accept: 'text/html' } })).text();
     ok('/status HTML Downloads column', sHtml.includes('<th>Downloads</th>') && sHtml.includes('fork 1 · upstream 0'));
-    ok('/status HTML total line', /Downloads:<\/b> 1 tarballs \(fork 1 · upstream 0\)/.test(sHtml));
+    ok('/status HTML unmapped table', sHtml.includes('Top unmapped packages') && sHtml.includes('<code>left-pad</code>'));
+    ok('/status HTML total line', /Downloads:<\/b> 2 tarballs \(fork 1 · upstream 1\)/.test(sHtml));
     await new Promise((r) => setTimeout(r, 200));
     const saved = JSON.parse(readFileSync(join(COUNTS_TMP, 'downloads.json'), 'utf8'));
     ok('downloads.json flushed', saved.packages?.['broken-demo']?.fork === 1, JSON.stringify(saved.packages?.['broken-demo']));
+    ok('downloads.json persists unmapped names', saved.unmapped?.['left-pad']?.metadata === 2 && saved.unmapped['left-pad'].upstream === 1, JSON.stringify(saved.unmapped));
     ok('downloads.json has no IPs', !/127\.0\.0\.1|::1|ffff/.test(JSON.stringify(saved)));
   }
 
@@ -189,7 +202,7 @@ try {
     const other = await fetch(`${base}/-/npm/v1/security/other`, { method: 'POST', body: '{}' });
     ok('other POST under /-/npm → 405', other.status === 405, `status=${other.status}`);
     const d = await getDl(base);
-    ok('audit POSTs not counted', d.total.metadata === 2 && d.total.tarballs === 1, JSON.stringify(d.total));
+    ok('audit POSTs not counted', d.total.metadata === 3 && d.total.tarballs === 2, JSON.stringify(d.total));
   }
 
   // broken-demo dark → fork
@@ -396,6 +409,23 @@ try {
     ok('lightRepos() covers every mapped GitHub repo', want.every((r) => repos.includes(r)) && !repos.includes('local/broken-demo'), repos.join(','));
     const lj = JSON.parse(readFileSync(join(ROOT, 'lights.json'), 'utf8')).map((l) => l.repo);
     ok('bundled lights.json snapshot includes every mapped GitHub repo', want.every((r) => lj.includes(r)));
+    {
+      const before = mod.unmappedPublic().tracked;
+      for (let i = 0; i < mod.UNMAPPED_MAX + 10; i += 1) mod.countHit(`zz-evict-${i}`, 'metadata', null);
+      for (let k = 0; k < 5; k += 1) mod.countHit('zz-hot', 'upstream', null);
+      mod.countHit('../etc/passwd', 'metadata', null);
+      mod.countHit('Bad Name', 'metadata', null);
+      const pub = mod.unmappedPublic();
+      ok('unmapped names bounded to UNMAPPED_MAX', pub.tracked === mod.UNMAPPED_MAX, `${before}->${pub.tracked}`);
+      ok('unmapped eviction keeps the hottest name on top', pub.top[0].name === 'zz-hot' && pub.top[0].upstream === 5, JSON.stringify(pub.top[0]));
+      ok('unmapped ignores invalid names', !mod.unmappedTop(1e6).some((t) => /passwd|Bad/.test(t.name)));
+      ok('mapped name not counted as unmapped', (mod.countHit('broken-demo', 'metadata', { npmName: 'broken-demo' }), !mod.unmappedTop(1e6).some((t) => t.name === 'broken-demo')));
+      ok('githubRepoOf parses npm repository forms',
+        mod.githubRepoOf({ url: 'git+https://github.com/stevemao/left-pad.git' }) === 'stevemao/left-pad' &&
+        mod.githubRepoOf('github:foo/bar') === 'foo/bar' && mod.githubRepoOf('foo/bar') === 'foo/bar' &&
+        mod.githubRepoOf({ url: 'git+ssh://git@github.com/a/b.js.git' }) === 'a/b.js' &&
+        mod.githubRepoOf({ url: 'https://gitlab.com/a/b' }) === null && mod.githubRepoOf(undefined) === null);
+    }
     const pj = mod.tarballManifest('tarballs/unzipper-0.12.5.tgz');
     ok('tarballManifest reads package.json from .tgz', pj?.name === 'unzipper' && pj.version === '0.12.5');
     // manual switch semantics (pure): needs rewriteReady + reason; dark always wins; never touches the light

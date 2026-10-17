@@ -528,6 +528,7 @@ const counter = {
   file: null,
   packages: {}, // name -> { fork, upstream, metadata }
   hours: {}, // name -> { 'YYYY-MM-DDTHH': { fork, upstream, metadata } }
+  unmapped: {}, // unmapped npm name -> { metadata, upstream, hours: { 'YYYY-MM-DDTHH': { metadata, upstream } } } (bounded)
   flushTimer: null,
   lastError: null,
 };
@@ -553,6 +554,11 @@ function initCounter() {
           counter.packages[name] = { ...zeroCounts(), ...c };
         }
         counter.hours = saved.hours && typeof saved.hours === 'object' ? saved.hours : {};
+        for (const [name, u] of Object.entries(saved.unmapped || {})) {
+          if (!validNpmName(name) || !u || typeof u !== 'object') continue;
+          counter.unmapped[name] = { metadata: +u.metadata || 0, upstream: +u.upstream || 0, hours: u.hours && typeof u.hours === 'object' ? u.hours : {} };
+        }
+        evictUnmapped();
       }
     }
     // prove writability now so the status page doesn't lie about persistence
@@ -575,6 +581,9 @@ function pruneHours(now = Date.now()) {
     for (const k of Object.keys(hrs)) if (k < cutoff) delete hrs[k];
     if (!Object.keys(hrs).length) delete counter.hours[name];
   }
+  for (const u of Object.values(counter.unmapped)) {
+    for (const k of Object.keys(u.hours || {})) if (k < cutoff) delete u.hours[k];
+  }
 }
 
 function flushCounterNow() {
@@ -585,7 +594,7 @@ function flushCounterNow() {
   }
   try {
     pruneHours();
-    const data = { version: 1, since: counter.since, savedAt: new Date().toISOString(), packages: counter.packages, hours: counter.hours };
+    const data = { version: 1, since: counter.since, savedAt: new Date().toISOString(), packages: counter.packages, hours: counter.hours, unmapped: counter.unmapped };
     writeFileSync(counter.file + '.tmp', JSON.stringify(data, null, 2) + '\n');
     renameSync(counter.file + '.tmp', counter.file);
   } catch (e) {
@@ -610,7 +619,125 @@ function countHit(npmName, kind, mapped) {
   const hrs = (counter.hours[name] ||= {});
   const h = (hrs[hk] ||= zeroCounts());
   h[kind] += 1;
+  if (name === OTHER_BUCKET && (kind === 'metadata' || kind === 'upstream')) countUnmapped(npmName, kind);
   scheduleFlush();
+}
+
+// --- per-name counts for unmapped packages ------------------------------------
+// Alongside (never instead of) the aggregate OTHER_BUCKET: package name only, no
+// IPs / user agents / versions. Bounded to UNMAPPED_MAX names; when full, the name
+// with the lowest total is evicted to make room for a new one.
+const UNMAPPED_MAX = Math.max(1, Number(process.env.UNMAPPED_MAX || 200));
+const UNMAPPED_TOP = Math.max(1, Number(process.env.UNMAPPED_TOP || 25));
+
+function validNpmName(n) {
+  return typeof n === 'string' && n.length <= 214 && /^(@[a-z0-9][a-z0-9._~-]*\/)?[a-z0-9][a-z0-9._~-]*$/.test(n);
+}
+
+function unmappedTotal(u) {
+  return (u.metadata || 0) + (u.upstream || 0);
+}
+
+function evictUnmapped(keep = null) {
+  const names = Object.keys(counter.unmapped);
+  let excess = names.length - UNMAPPED_MAX;
+  if (excess <= 0) return;
+  const order = names.filter((n) => n !== keep).sort((a, b) => unmappedTotal(counter.unmapped[a]) - unmappedTotal(counter.unmapped[b]) || (a < b ? 1 : -1));
+  for (const n of order) {
+    if (excess-- <= 0) break;
+    delete counter.unmapped[n];
+  }
+}
+
+function countUnmapped(npmName, kind) {
+  if (!validNpmName(npmName)) return;
+  let u = counter.unmapped[npmName];
+  if (!u) {
+    u = counter.unmapped[npmName] = { metadata: 0, upstream: 0, hours: {} };
+    evictUnmapped(npmName);
+  }
+  u[kind] += 1;
+  const h = ((u.hours ||= {})[hourKey()] ||= { metadata: 0, upstream: 0 });
+  h[kind] += 1;
+}
+
+function unmappedTop(n = UNMAPPED_TOP, now = Date.now()) {
+  const cutoff = hourKey(now - 23 * HOUR_MS);
+  return Object.entries(counter.unmapped)
+    .map(([name, u]) => {
+      const last24h = { metadata: 0, upstream: 0 };
+      for (const [k, h] of Object.entries(u.hours || {})) if (k >= cutoff) { last24h.metadata += h.metadata || 0; last24h.upstream += h.upstream || 0; }
+      return { name, metadata: u.metadata, upstream: u.upstream, last24h };
+    })
+    .sort((a, b) => b.metadata + b.upstream - (a.metadata + a.upstream) || (a.name < b.name ? -1 : 1))
+    .slice(0, n);
+}
+
+// Light for the top unmapped names: repo from the npm "latest" manifest, lit/dark from
+// the same GitHub check as tracked lights (fetchOneLight). Cached; refreshed in background.
+const UNMAPPED_LIGHTS = process.env.UNMAPPED_LIGHTS !== '0';
+const UNMAPPED_LIGHT_MINUTES = Number(process.env.UNMAPPED_LIGHT_MINUTES || 60);
+const unmappedLightCache = new Map(); // name -> { at, repo, light|null, error|null }
+let unmappedLightRefreshing = false;
+
+function githubRepoOf(repository) {
+  const url = typeof repository === 'string' ? repository : repository?.url;
+  if (!url) return null;
+  const m = String(url).match(/^(?:github:)?([\w.-]+)\/([\w.-]+?)(?:\.git)?$/) || String(url).match(/github\.com[/:]([\w.-]+)\/([\w.-]+?)(?:\.git)?(?:[#/].*)?$/);
+  return m ? `${m[1]}/${m[2]}` : null;
+}
+
+async function resolveUnmappedLight(name) {
+  const entry = { at: Date.now(), repo: null, light: null, error: null };
+  try {
+    const res = await fetch(`${UPSTREAM}/${name.replace('/', '%2F')}/latest`, { headers: { Accept: 'application/json', 'User-Agent': UA } });
+    if (!res.ok) throw new Error(`npm HTTP ${res.status}`);
+    entry.repo = githubRepoOf((await res.json()).repository);
+    if (entry.repo) {
+      if (Date.now() < ghBackoffUntil) throw new Error('GitHub rate limited');
+      const l = await fetchOneLight(entry.repo);
+      entry.light = { lit: l.lit, conclusion: l.conclusion, url: l.url, runAt: l.runAt, darkSince: l.darkSince || null, darkSinceCapped: !!l.darkSinceCapped };
+    }
+  } catch (e) {
+    const prev = unmappedLightCache.get(name);
+    if (prev?.light) { entry.repo = prev.repo; entry.light = { ...prev.light, stale: true }; }
+    entry.error = String(e.message || e).slice(0, 120);
+  }
+  unmappedLightCache.set(name, entry);
+  return entry;
+}
+
+/** Fire-and-forget; resolves only stale/missing entries among the current top names. */
+function ensureUnmappedLights() {
+  if (!UNMAPPED_LIGHTS || unmappedLightRefreshing) return null;
+  const maxAge = Math.max(1, UNMAPPED_LIGHT_MINUTES) * 60 * 1000;
+  const due = unmappedTop().map((t) => t.name).filter((n) => !unmappedLightCache.has(n) || Date.now() - unmappedLightCache.get(n).at >= maxAge);
+  if (!due.length) return null;
+  unmappedLightRefreshing = true;
+  const p = (async () => {
+    for (let i = 0; i < due.length; i += 5) await Promise.allSettled(due.slice(i, i + 5).map(resolveUnmappedLight));
+  })().finally(() => { unmappedLightRefreshing = false; });
+  return p;
+}
+
+function unmappedPublic() {
+  const top = unmappedTop().map((t) => {
+    const c = unmappedLightCache.get(t.name);
+    const state = c?.light ? (c.light.lit ? 'lit' : 'dark') : 'unknown';
+    return {
+      ...t,
+      repo: c?.repo || null,
+      light: { state, conclusion: c?.light?.conclusion || null, url: c?.light?.url || null, darkSince: c?.light?.darkSince || null, stale: !!c?.light?.stale },
+      forkCandidate: state === 'dark',
+      lightNote: c ? (c.error ? (/no completed runs/.test(c.error) ? 'no GitHub Actions push runs' : 'lookup failed') : c.repo ? null : 'no GitHub repo in npm metadata') : 'not checked yet',
+    };
+  });
+  return {
+    tracked: Object.keys(counter.unmapped).length,
+    max: UNMAPPED_MAX,
+    top,
+    note: `per-name counts for unmapped packages (metadata + upstream tarball GETs), top ${UNMAPPED_MAX} names kept, lowest evicted; names only, no IPs. Started on this build — earlier "other" totals were aggregated without names and cannot be broken down.`,
+  };
 }
 
 function last24For(name, now = Date.now()) {
@@ -646,6 +773,7 @@ function downloadsSummary() {
     total: { ...total, tarballs: total.fork + total.upstream + total.manual },
     last24h: { ...last24h, tarballs: last24h.fork + last24h.upstream + last24h.manual },
     other: downloadsFor(OTHER_BUCKET),
+    unmapped: unmappedPublic(),
     counted: 'tarball GETs served from fork (light dark) / manual switch / upstream (incl. proxied) and package metadata GETs; /, /status, /health not counted; no IPs stored',
   };
 }
@@ -1396,6 +1524,24 @@ function downloadsLine(d) {
   <br><small>${d.persistent ? `since ${escapeHtml(d.since)}` : escapeHtml(d.note)} · unmapped packages (proxied): ${o.upstream} tarballs · ${o.metadata} metadata · all requests counted, incl. our own tests; /, /status, /health excluded; no IPs stored</small></p>`;
 }
 
+function unmappedHtml(d) {
+  const u = d && d.unmapped;
+  if (!u || !u.top.length) return '';
+  const row = (t, i) => {
+    const lt = t.light.state === 'dark'
+      ? `<b style="color:#f85149">dark</b>${t.light.url ? ` <a href="${escapeHtml(t.light.url)}" target="_blank" rel="noopener">run</a>` : ''} · <b>fork candidate</b>`
+      : t.light.state === 'lit' ? '<span style="color:#3fb950">lit</span>' : '<span class="muted">unknown</span>';
+    const repo = t.repo ? `<a href="https://github.com/${escapeHtml(t.repo)}" target="_blank" rel="noopener">${escapeHtml(t.repo)}</a>` : '—';
+    return `<tr><td>${i + 1}</td><td><code>${escapeHtml(t.name)}</code></td><td>${t.metadata}</td><td>${t.upstream}</td><td>${t.last24h.metadata} · ${t.last24h.upstream}</td><td>${repo}</td><td>${lt}</td></tr>`;
+  };
+  return `<h3 id="unmapped">Top unmapped packages (proxied)</h3>
+  <p class="muted">${escapeHtml(u.note)} Showing ${u.top.length} of ${u.tracked}.</p>
+  <table class="unmapped">
+    <tr><th>#</th><th>package</th><th>metadata</th><th>upstream tarballs</th><th>24h (meta · tarballs)</th><th>repo</th><th>light</th></tr>
+    ${u.top.map(row).join('\n')}
+  </table>`;
+}
+
 function htmlStatusPublic(status) {
   const link = (href, text) =>
     `<a href="${escapeHtml(href)}" target="_blank" rel="noopener">${escapeHtml(text)}</a>`;
@@ -1538,6 +1684,7 @@ function htmlStatusPublic(status) {
 
   <h2 id="all">All tracked lights</h2>
   ${downloadsLine(status.downloads)}
+  ${unmappedHtml(status.downloads)}
   <table>
     <tr><th>Light repo</th><th>npm name</th><th>Status</th><th>Rewrite</th><th>Downloads</th><th>Fork</th><th>Upstream</th><th>Note</th></tr>
     ${rows}
@@ -1636,6 +1783,7 @@ const server = http.createServer(async (req, res) => {
     }
     try {
       await ensureNpmWeekly();
+      ensureUnmappedLights();
     } catch {
       /* ignore */
     }
@@ -1808,4 +1956,10 @@ export {
   darkStreakOf,
   fetchOneLight,
   watchlistPublic,
+  countHit,
+  unmappedTop,
+  unmappedPublic,
+  githubRepoOf,
+  validNpmName,
+  UNMAPPED_MAX,
 };
