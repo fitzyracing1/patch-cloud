@@ -22,6 +22,9 @@
  *    /status shows it distinctly and counts it separately; dark still wins when dark
  *  - status wording: primary labels never use the bare word "failure"
  *  - lights tracked live include every mapped GitHub repo
+ *  - dark streak / down: REWRITE_ON=down (default) needs streak ≥ DOWN_AFTER (default 3);
+ *    REWRITE_ON=dark keeps the old behavior; lit resets to 0; in-memory fallback when a
+ *    light has no run history; /status JSON + HTML show streak and down; dayjs manual unchanged
  */
 import { createServer } from 'node:net';
 import { spawn } from 'node:child_process';
@@ -82,6 +85,7 @@ async function startServer(port, extraEnv = {}) {
     RATE_LIMIT_PER_MIN: '0',
     STATUS_VERBOSE: '0',
     LIGHTS_FILE: join(ROOT, 'lights.json'),
+    REWRITE_ON: 'dark', // legacy suite: rewrite on first dark; dark-streak tests below use 'down'
     ...extraEnv,
   };
   const child = spawn(process.execPath, [join(ROOT, 'server.mjs')], {
@@ -400,10 +404,12 @@ try {
     ok('tarballManifest reads package.json from .tgz', pj?.name === 'unzipper' && pj.version === '0.12.5');
     // manual switch semantics (pure): needs rewriteReady + reason; dark always wins; never touches the light
     const lit = { lit: true, conclusion: 'success' };
-    const dark = { lit: false, conclusion: 'failure' };
+    const dark = { lit: false, conclusion: 'failure', darkRuns: 3 }; // in-process import runs with REWRITE_ON=down
     const mm = { npmName: 'x', rewriteReady: true, manualRewrite: { reason: 'r', since: '2026-10-11' } };
     ok('manual + lit → manual', mod.rewriteMode(mm, lit).mode === 'manual');
-    ok('manual + dark → fork (dark wins)', mod.rewriteMode(mm, dark).mode === 'fork');
+    ok('manual + down → fork (down wins)', mod.rewriteMode(mm, dark).mode === 'fork');
+    ok('manual + dark, not down → manual (switch keeps serving)', mod.rewriteMode(mm, { ...dark, darkRuns: 1 }).mode === 'manual');
+    ok('no manual + dark, not down → none', mod.rewriteMode({ ...mm, manualRewrite: null }, { ...dark, darkRuns: 2 }).mode === 'none');
     ok('manual without rewriteReady → none', mod.rewriteMode({ ...mm, rewriteReady: false }, lit).mode === 'none');
     ok('manual without reason → none', mod.rewriteMode({ ...mm, manualRewrite: { since: 'x' } }, lit).mode === 'none');
     ok('manual does not mutate light', lit.lit === true && lit.conclusion === 'success');
@@ -526,6 +532,92 @@ try {
     const html = await (await fetch(`http://127.0.0.1:${p}/status`, { headers: { Accept: 'text/html' } })).text();
     ok(`COUNTS_DIR ${label} → HTML shows restart note`, html.includes('counts since last restart') && !html.includes(COUNTS_TMP) && !html.includes('/tmp/'));
     await stop(child);
+  }
+  // --- dark streak / down -------------------------------------------------------
+  {
+    const lightsBase = JSON.parse(readFileSync(join(ROOT, 'lights.json'), 'utf8'));
+    const mk = (over) => {
+      const f = join(COUNTS_TMP, `lights-${Math.random().toString(36).slice(2)}.json`);
+      const arr = lightsBase.map((l) => (over[l.repo] ? { ...l, ...over[l.repo] } : l));
+      writeFileSync(f, JSON.stringify(arr));
+      return f;
+    };
+    const dk = (n) => ({ lit: false, conclusion: 'failure', darkRuns: n });
+    const writeDemo = (entry) => writeFileSync(LOCAL_LIGHTS, JSON.stringify({ 'local/broken-demo': { ...overrideEntry('local/broken-demo', entry.lit), ...entry } }));
+    const pkgOf = (st, repo) => st.packages.find((p) => p.repo === repo);
+    const run = async (env, fn) => {
+      const p = await freePort();
+      ({ child } = await startServer(p, env));
+      try { await fn(`http://127.0.0.1:${p}`); } finally { await stop(child); }
+    };
+
+    writeDemo({ lit: false, darkRuns: 2 });
+    const f1 = mk({ 'ZJONSSON/node-unzipper': dk(2), 'jimp-dev/jimp': dk(3), 'vercel/ms': { lit: true, conclusion: 'success', darkRuns: 0 } });
+    await run({ REWRITE_ON: '', LIGHTS_FILE: f1 }, async (b) => {
+      const st = await (await fetch(`${b}/status`)).json();
+      ok('streak: JSON has downAfter 3 / rewriteOn down by default', st.downAfter === 3 && st.rewriteOn === 'down');
+      const uz = pkgOf(st, 'ZJONSSON/node-unzipper');
+      ok('streak 2 → dark, not down; no rewrite', uz.light.state === 'dark' && uz.light.streak === 2 && uz.light.down === false && uz.rewrite === 'dark, not down' && uz.install === null, JSON.stringify(uz.light));
+      const jp = pkgOf(st, 'jimp-dev/jimp');
+      ok('streak 3 → down; rewrite active', jp.light.streak === 3 && jp.light.down === true && jp.rewrite === 'active');
+      const ms = pkgOf(st, 'vercel/ms');
+      ok('lit → streak 0, not down', ms.light.state === 'lit' && ms.light.streak === 0 && ms.light.down === false && ms.rewrite === 'ready');
+      const dj = pkgOf(st, 'iamkun/dayjs');
+      ok('dayjs manual switch unchanged under REWRITE_ON=down', dj.rewrite === 'manual' && dj.light.state === 'lit');
+      ok('counts.down / darkNotDown', st.counts.down >= 1 && st.counts.darkNotDown >= 1, JSON.stringify(st.counts));
+      const djMeta = await fetch(`${b}/dayjs`);
+      ok('dayjs metadata still served via manual switch', djMeta.ok && JSON.stringify(await djMeta.json()).includes('manual'));
+      const uzMeta = await (await fetch(`${b}/unzipper`)).json().catch(() => ({}));
+      ok('unzipper (streak 2) metadata not rewritten', !JSON.stringify(uzMeta).includes('_patchCloud'));
+      const t = await fetch(`${b}/broken-demo/-/broken-demo-1.0.0.tgz`);
+      ok('broken-demo dark streak 2 → upstream tarball', t.headers.get('x-patch-cloud') === 'upstream', t.headers.get('x-patch-cloud'));
+      const h = await (await fetch(`${b}/status`, { headers: { Accept: 'text/html' } })).text();
+      ok('HTML shows dark streak + down', h.includes('dark streak 3') && h.includes('<b>down</b>') && h.includes('dark streak 2 of 3 to down'));
+      ok('HTML/JSON use only lit/dark words for lights (no green/red light words)', !/\b(green|red) light\b/i.test(h));
+    });
+
+    writeDemo({ lit: false, darkRuns: 3 });
+    await run({ REWRITE_ON: 'down', LIGHTS_FILE: f1 }, async (b) => {
+      const t = await fetch(`${b}/broken-demo/-/broken-demo-1.0.0.tgz`);
+      ok('broken-demo streak 3 → fork tarball', t.headers.get('x-patch-cloud') === 'fork');
+    });
+
+    await run({ REWRITE_ON: 'down', DOWN_AFTER: '2', LIGHTS_FILE: f1 }, async (b) => {
+      const st = await (await fetch(`${b}/status`)).json();
+      const uz = pkgOf(st, 'ZJONSSON/node-unzipper');
+      ok('DOWN_AFTER=2 → streak 2 is down', st.downAfter === 2 && uz.light.down === true && uz.rewrite === 'active');
+    });
+
+    writeDemo({ lit: false, darkRuns: 1 });
+    await run({ REWRITE_ON: 'dark', LIGHTS_FILE: f1 }, async (b) => {
+      const st = await (await fetch(`${b}/status`)).json();
+      ok('REWRITE_ON=dark → streak 2 rewrites (old behavior)', pkgOf(st, 'ZJONSSON/node-unzipper').rewrite === 'active' && st.rewriteOn === 'dark');
+      const t = await fetch(`${b}/broken-demo/-/broken-demo-1.0.0.tgz`);
+      ok('REWRITE_ON=dark → broken-demo streak 1 serves fork', t.headers.get('x-patch-cloud') === 'fork');
+    });
+
+    // in-memory fallback: no darkRuns on the light → count distinct dark readings
+    writeFileSync(LOCAL_LIGHTS, JSON.stringify({ 'local/broken-demo': overrideEntry('local/broken-demo', false) }));
+    await run({ REWRITE_ON: 'down', LIGHTS_FILE: f1, LIGHTS_CACHE_MINUTES: '0' }, async (b) => {
+      let st = await (await fetch(`${b}/status`)).json();
+      const s1 = pkgOf(st, 'local/broken-demo').light;
+      ok('memory fallback: first dark reading → streak 1', s1.streak === 1 && s1.streakSource === 'memory' && !s1.down, JSON.stringify(s1));
+      st = await (await fetch(`${b}/status`)).json();
+      ok('memory fallback: same reading does not bump streak', pkgOf(st, 'local/broken-demo').light.streak === 1);
+      for (let i = 0; i < 2; i++) {
+        await new Promise((r) => setTimeout(r, 5));
+        writeFileSync(LOCAL_LIGHTS, JSON.stringify({ 'local/broken-demo': overrideEntry('local/broken-demo', false) }));
+        st = await (await fetch(`${b}/status`)).json();
+      }
+      const s3 = pkgOf(st, 'local/broken-demo').light;
+      ok('memory fallback: 3 distinct dark readings → down', s3.streak === 3 && s3.down === true, JSON.stringify(s3));
+      writeFileSync(LOCAL_LIGHTS, JSON.stringify({ 'local/broken-demo': overrideEntry('local/broken-demo', true) }));
+      st = await (await fetch(`${b}/status`)).json();
+      ok('memory fallback: lit resets streak to 0', pkgOf(st, 'local/broken-demo').light.streak === 0);
+      writeFileSync(LOCAL_LIGHTS, JSON.stringify({ 'local/broken-demo': overrideEntry('local/broken-demo', false) }));
+      st = await (await fetch(`${b}/status`)).json();
+      ok('memory fallback: dark after lit → streak 1', pkgOf(st, 'local/broken-demo').light.streak === 1);
+    });
   }
 } catch (e) {
   console.error(e);

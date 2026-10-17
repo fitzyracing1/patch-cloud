@@ -41,7 +41,7 @@ import {
   LIGHTS_REFRESH_MINUTES,
   UPSTREAM_REFRESH_MINUTES,
   PACKUMENT_CACHE_MINUTES,
-} from './config.mjs';
+  DOWN_AFTER, REWRITE_ON } from './config.mjs';
 import { gunzipSync } from 'node:zlib';
 
 const LOCAL_LIGHTS = join(ROOT, 'local-lights.json');
@@ -125,14 +125,33 @@ function darkStreakOf(runs) {
   };
 }
 
+/** Default branch per repo (mapping.json `defaultBranch`, else one GitHub API call, cached for the process). */
+const defaultBranchCache = new Map();
+async function defaultBranchOf(repo, headers) {
+  const fromMap = loadMapping()[repo]?.defaultBranch;
+  if (fromMap) return fromMap;
+  if (defaultBranchCache.has(repo)) return defaultBranchCache.get(repo);
+  try {
+    const r = await fetch(`https://api.github.com/repos/${repo}`, { headers });
+    if (!r.ok) { noteRateLimit(r); return null; }
+    const b = (await r.json()).default_branch || null;
+    if (b) defaultBranchCache.set(repo, b);
+    return b;
+  } catch {
+    return null;
+  }
+}
+
 async function fetchOneLight(repo) {
-  const url = `https://api.github.com/repos/${repo}/actions/runs?per_page=30&status=completed&event=push`;
   const headers = {
     Accept: 'application/vnd.github+json',
     'User-Agent': UA,
     'X-GitHub-Api-Version': '2022-11-28',
   };
   if (GITHUB_TOKEN) headers.Authorization = `Bearer ${GITHUB_TOKEN}`;
+  // Dark streak = consecutive non-success completed push runs on the default branch.
+  const branch = await defaultBranchOf(repo, headers);
+  const url = `https://api.github.com/repos/${repo}/actions/runs?per_page=30&status=completed&event=push${branch ? `&branch=${encodeURIComponent(branch)}` : ''}`;
   const res = await fetch(url, { headers });
   if (!res.ok) {
     noteRateLimit(res);
@@ -149,7 +168,9 @@ async function fetchOneLight(repo) {
     url: run.html_url,
     lit: run.conclusion === 'success',
     runAt: run.updated_at,
+    branch: branch || run.head_branch || null,
     ...darkStreakOf(runs),
+    darkRuns: run.conclusion === 'success' ? 0 : darkStreakOf(runs).darkRuns,
     fetchedAt: new Date().toISOString(),
   };
 }
@@ -406,11 +427,49 @@ async function rewrittenPackument(req, mapped, mode) {
   return single;
 }
 
+// --- dark streak / down -------------------------------------------------------
+// Stateless first: light.darkRuns comes from the upstream run history (consecutive
+// non-success completed runs on the default branch). When a light carries no run
+// history (file / local override), fall back to counting distinct dark readings in memory.
+const memStreak = new Map(); // repo -> { id, streak }
+function readingId(light) {
+  return `${light.url || ''}|${light.runAt || ''}|${light.conclusion || ''}`;
+}
+function streakFor(light) {
+  if (!light || typeof light.lit !== 'boolean') return { streak: null, source: 'none' };
+  const key = light.repo || '?';
+  if (light.lit) {
+    memStreak.set(key, { id: readingId(light), streak: 0 });
+    return { streak: 0, source: 'lit' };
+  }
+  if (Number.isFinite(light.darkRuns) && light.darkRuns >= 0) {
+    return { streak: light.darkRuns, capped: !!light.darkSinceCapped, source: 'run-history' };
+  }
+  const id = readingId(light);
+  const prev = memStreak.get(key);
+  let streak;
+  if (prev && prev.id === id) streak = prev.streak;
+  else streak = (prev ? prev.streak : 0) + 1;
+  memStreak.set(key, { id, streak });
+  return { streak, source: 'memory' };
+}
+function downInfo(light) {
+  const s = streakFor(light);
+  const down = s.streak != null && s.streak >= DOWN_AFTER;
+  return { streak: s.streak, capped: !!s.capped, streakSource: s.source, down, downAfter: DOWN_AFTER, rewriteOn: REWRITE_ON };
+}
+/** Whether the light is bad enough to rewrite: dark (REWRITE_ON=dark) or down (default). */
+function rewriteGate(light) {
+  const dark = !!light && light.lit === false;
+  if (!dark) return false;
+  return REWRITE_ON === 'dark' ? true : downInfo(light).down;
+}
+
 /** How a mapped package is served right now. Never alters the light itself. */
 function rewriteMode(mapped, light) {
   const dark = !!light && light.lit === false;
   if (!mapped || !mapped.rewriteReady || !mapped.npmName) return { mode: 'none', dark };
-  if (dark) return { mode: 'fork', dark };
+  if (rewriteGate(light)) return { mode: 'fork', dark };
   if (hasManual(mapped)) return { mode: 'manual', dark };
   return { mode: 'none', dark };
 }
@@ -728,6 +787,10 @@ function displayFor(m, light, rewrite) {
   } else if (rewrite === 'manual') {
     label = 'Fork available (manual: fix waiting upstream)';
     tone = 'green';
+  } else if (rewrite === 'dark, not down') {
+    const d = downInfo(light);
+    label = `Upstream build failing — dark ${d.streak ?? '?'} of ${d.downAfter}; fork served once down`;
+    tone = 'warn';
   } else if (!m.npmName) {
     label = state === 'lit' ? 'Upstream OK' : state === 'dark' ? 'Upstream build failing — not an npm rewrite target' : 'Upstream build status unknown';
     tone = state === 'lit' ? 'ok' : state === 'dark' ? 'warn' : 'muted';
@@ -955,8 +1018,9 @@ function mergedPublic() {
 function rewriteStateFor(m, light) {
   const lit = light ? !!light.lit : null;
   const dark = lit === false;
-  if (m.rewriteReady && m.npmName && dark) return 'active';
+  if (m.rewriteReady && m.npmName && rewriteGate(light)) return 'active';
   if (m.rewriteReady && m.npmName && hasManual(m)) return 'manual';
+  if (m.rewriteReady && m.npmName && dark) return 'dark, not down';
   if (dark && m.npmName && !m.rewriteReady) return 'would rewrite';
   if (m.rewriteReady && m.npmName) return 'ready';
   return 'n/a';
@@ -982,6 +1046,7 @@ function publicStatusPayload() {
         ci: light ? ciWord(light.conclusion) : 'unknown',
         url: light && /^https:\/\/github\.com\//.test(light.url || '') ? light.url : null,
         fetchedAt: light?.fetchedAt ?? null,
+        ...downInfo(light),
       },
       status: displayFor(m, light, rewrite),
       rewrite,
@@ -1007,12 +1072,16 @@ function publicStatusPayload() {
     publicUrl: PUBLIC_URL || null,
     lightsCachedAt: lightsCache.at ? new Date(lightsCache.at).toISOString() : null,
     lightsCacheMinutes: LIGHTS_CACHE_MINUTES,
+    downAfter: DOWN_AFTER,
+    rewriteOn: REWRITE_ON,
     counts: {
       rewriteActive: count((p) => p.rewrite === 'active'),
       manual: count((p) => p.rewrite === 'manual'),
       ready: count((p) => p.rewrite === 'ready'),
       wouldRewrite: count((p) => p.rewrite === 'would rewrite'),
       dark: count((p) => p.light.state === 'dark'),
+      down: count((p) => p.light.down),
+      darkNotDown: count((p) => p.rewrite === 'dark, not down'),
       lit: count((p) => p.light.state === 'lit'),
       unknown: count((p) => p.light.state === 'unknown'),
     },
@@ -1024,7 +1093,9 @@ function publicStatusPayload() {
       lit: 'Upstream OK — normal npm (CI passing → proxied / upstream)',
       dark: 'Upstream build failing → fork served when one is packaged',
       manual: 'Fork available (manual: fix waiting upstream) — labeled override; the CI light is shown as-is and is never faked',
-      rewrite: 'active = serving fork now (light dark) · manual = serving fork via the labeled manual switch (light lit) · ready = packaged, light lit → upstream · would rewrite = dark but no fork packaged · n/a = not an npm rewrite target',
+      streak: 'dark streak = consecutive dark readings of the upstream light on its default branch (0 when lit)',
+      down: `down = dark streak ≥ ${DOWN_AFTER}; rewrites to the fork happen when ${REWRITE_ON === 'down' ? 'down' : 'dark'}`,
+      rewrite: 'active = serving fork now (light dark) · manual = serving fork via the labeled manual switch (light lit) · dark, not down = packaged, light dark but streak below the down threshold → upstream · ready = packaged, light lit → upstream · would rewrite = dark but no fork packaged · n/a = not an npm rewrite target',
     },
     optIn: {
       install: `npm install <pkg> --registry ${reg}`,
@@ -1044,7 +1115,7 @@ function statusPayloadVerbose() {
     const light = lightFor(repo, lights);
     const lit = light ? !!light.lit : null;
     const dark = lit === false;
-    const rewriteActive = !!(m.rewriteReady && m.npmName && dark);
+    const rewriteActive = !!(m.rewriteReady && m.npmName && rewriteGate(light));
     packages.push({
       repo,
       npmName: m.npmName,
@@ -1052,6 +1123,7 @@ function statusPayloadVerbose() {
       manualRewrite: m.manualRewrite || null,
       status: displayFor(m, light, rewriteStateFor(m, light)),
       lit,
+      ...downInfo(light),
       conclusion: light?.conclusion ?? 'unknown',
       lightSource: light?.source ?? 'none',
       rewriteReady: !!m.rewriteReady,
@@ -1233,7 +1305,11 @@ function statusCellHtml(p) {
   const manual = p.manual
     ? `<br><small style="color:#d2a8ff">manual: fix available${p.manual.reason ? ` — ${escapeHtml(p.manual.reason)}` : ''}${p.manual.since ? ` (since ${escapeHtml(p.manual.since)})` : ''}</small>`
     : '';
-  return `${primary}<br><small>${sec}${p.light.fetchedAt ? ` · checked ${escapeHtml(p.light.fetchedAt)}` : ''}</small>${manual}`;
+  const l = p.light || {};
+  const streak = l.streak == null
+    ? ''
+    : `<br><small class="streak" style="color:${l.down ? '#f85149' : '#8b949e'}">dark streak ${escapeHtml(l.streak)}${l.capped ? '+' : ''}${l.down ? ` · <b>down</b> (≥ ${escapeHtml(l.downAfter)})` : ` of ${escapeHtml(l.downAfter)} to down`}</small>`;
+  return `${primary}${streak}<br><small>${sec}${p.light.fetchedAt ? ` · checked ${escapeHtml(p.light.fetchedAt)}` : ''}</small>${manual}`;
 }
 
 function htmlLanding(status) {
@@ -1542,7 +1618,7 @@ function htmlStatusPublic(status) {
     <tr><th>Light repo</th><th>npm name</th><th>Status</th><th>Rewrite</th><th>Downloads</th><th>Fork</th><th>Upstream</th><th>Note</th></tr>
     ${rows}
   </table>
-  <p><small>Lights are active-low: lit = upstream build passing, dark = upstream build failing. The manual switch never changes a light. Lights cache ${escapeHtml(status.lightsCacheMinutes)} min.</small></p>
+  <p><small>Lights are active-low: lit = upstream build passing, dark = upstream build failing. Dark streak = consecutive dark readings on the default branch; down = streak ≥ ${escapeHtml(status.downAfter)}; fork rewrites happen when ${escapeHtml(status.rewriteOn)}. The manual switch never changes a light. Lights cache ${escapeHtml(status.lightsCacheMinutes)} min.</small></p>
   </body></html>`;
 }
 

@@ -18,6 +18,9 @@
  *   UPSTREAM_REFRESH_MINUTES    min interval between upstream PR/issue state checks
  *                               (default 10 with GITHUB_TOKEN, 60 without)
  *   PACKUMENT_CACHE_MINUTES     cache for upstream packuments merged into rewrites (default 5)
+ *   DOWN_AFTER                  consecutive dark readings before a light counts as down (default 3)
+ *   REWRITE_ON                  'down' (default): rewrite to the fork only when down;
+ *                               'dark': previous behavior, rewrite on the first dark reading
  */
 import { existsSync } from 'node:fs';
 import { join, dirname } from 'node:path';
@@ -49,3 +52,7 @@ export const LIGHTS_REFRESH_MINUTES = Number(process.env.LIGHTS_REFRESH_MINUTES 
 export const UPSTREAM_REFRESH_MINUTES = Number(process.env.UPSTREAM_REFRESH_MINUTES || (GITHUB_TOKEN ? 10 : 60));
 /** Cache for upstream packuments that rewrites are merged into. */
 export const PACKUMENT_CACHE_MINUTES = Number(process.env.PACKUMENT_CACHE_MINUTES || 5);
+/** Consecutive dark readings (dark streak) at which a light is 'down'. */
+export const DOWN_AFTER = Math.max(1, Math.floor(Number(process.env.DOWN_AFTER || 3)) || 3);
+/** What gates the fork rewrite: 'down' (default) or 'dark' (previous behavior). */
+export const REWRITE_ON = String(process.env.REWRITE_ON || 'down').toLowerCase() === 'dark' ? 'dark' : 'down';
