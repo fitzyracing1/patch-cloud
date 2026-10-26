@@ -211,3 +211,11 @@ Silently replacing popular packages in a production registry that people hit by 
 | `DEPLOY.md` | Host options (no accounts created) |
 | `tarballs/` | Served `.tgz` files |
 | `lights.json` | Bundled snapshot for deploy |
+
+## Plans
+
+This project is free, and its license stays as is. Support it through [GitHub Sponsors](https://github.com/sponsors/fitzyracing1):
+
+- **Free**: use the code, community support.
+- **Pro ($49/month)**: priority issues and support.
+- **Team ($199/month)**: priority support for your team plus early access.
