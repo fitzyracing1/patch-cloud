@@ -24,6 +24,7 @@ import {
 import { createHash } from 'node:crypto';
 import { join, dirname, basename } from 'node:path';
 import { fileURLToPath } from 'node:url';
+import { createGitHub, lightOfRun, darkStreak, RateLimitError } from '@fitzyracing1/light-core';
 
 import {
   PORT,
@@ -76,14 +77,16 @@ function lightRepos() {
   return [...set];
 }
 
-// GitHub rate-limit backoff (unauthenticated API: 60 requests/hour/IP)
-let ghBackoffUntil = 0;
-function noteRateLimit(res) {
-  if ((res.status === 403 || res.status === 429) && res.headers.get('x-ratelimit-remaining') === '0') {
-    const reset = Number(res.headers.get('x-ratelimit-reset'));
-    ghBackoffUntil = Number.isFinite(reset) && reset > 0 ? reset * 1000 : Date.now() + 15 * 60 * 1000;
-  }
-}
+// One light-core GitHub client for lights and upstream reads (unauthenticated API: 60 requests/hour/IP).
+// It waits out retry-after and short resets, and refuses calls until a far reset (gh.rate.blockedUntil).
+// Waits are capped at 10 s so a request never hangs on GitHub.
+const gh = createGitHub({
+  token: GITHUB_TOKEN,
+  userAgent: UA,
+  fetch: (...args) => globalThis.fetch(...args),
+  maxWaitMs: 10_000,
+  retries: 2,
+});
 
 function loadJson(p, fallback = null) {
   try {
@@ -108,46 +111,26 @@ function mergeLights(ghArr) {
 }
 
 /**
- * How long the light has read dark: walk the newest push runs (newest first) while they
- * are not "success"; the oldest of that streak is when the light went dark. If the page
- * ends before a passing run, the streak is capped (dark at least that long).
+ * How long the light has read dark (light-core darkStreak): newest first while not "success"; runs are
+ * ordered by run_started_at, so a re-run counts when it ran. If the page ends before a lit run, the
+ * streak is capped (dark at least that long). Lit → {} (no dark fields).
  */
 function darkStreakOf(runs) {
-  if (!runs.length || runs[0].conclusion === 'success') return {};
-  let i = 0;
-  while (i < runs.length && runs[i].conclusion !== 'success') i += 1;
-  const first = runs[i - 1];
-  return {
-    darkSince: first.run_started_at || first.created_at || first.updated_at,
-    darkRuns: i,
-    darkSinceCapped: i === runs.length,
-    lastPassingAt: i < runs.length ? runs[i].updated_at : null,
-  };
+  const s = darkStreak(runs);
+  return s.darkRuns ? s : {};
 }
 
 async function fetchOneLight(repo) {
-  const url = `https://api.github.com/repos/${repo}/actions/runs?per_page=30&status=completed&event=push`;
-  const headers = {
-    Accept: 'application/vnd.github+json',
-    'User-Agent': UA,
-    'X-GitHub-Api-Version': '2022-11-28',
-  };
-  if (GITHUB_TOKEN) headers.Authorization = `Bearer ${GITHUB_TOKEN}`;
-  const res = await fetch(url, { headers });
-  if (!res.ok) {
-    noteRateLimit(res);
-    throw new Error(`${repo}: HTTP ${res.status}`);
-  }
-  const data = await res.json();
+  const data = await gh.get(`/repos/${repo}/actions/runs?per_page=30&status=completed&event=push`);
   const runs = data.workflow_runs || [];
   const run = runs[0];
-  if (!run) throw new Error(`${repo}: no completed runs`);
+  if (!run) throw new Error(`${repo}: no completed runs`); // an error, never dark
   return {
     repo,
     conclusion: run.conclusion,
     workflow: run.name,
     url: run.html_url,
-    lit: run.conclusion === 'success',
+    lit: lightOfRun(run) === 'lit',
     runAt: run.updated_at,
     ...darkStreakOf(runs),
     fetchedAt: new Date().toISOString(),
@@ -155,7 +138,7 @@ async function fetchOneLight(repo) {
 }
 
 async function refreshLightsFromGitHub() {
-  if (Date.now() < ghBackoffUntil) throw new Error(`GitHub rate limited until ${new Date(ghBackoffUntil).toISOString()}`);
+  if (Date.now() < gh.rate.blockedUntil) throw new Error(`GitHub rate limited until ${new Date(gh.rate.blockedUntil).toISOString()}`);
   const repos = lightRepos();
   const results = await Promise.allSettled(repos.map(fetchOneLight));
   // Keep the last known light for repos whose fetch failed (rate limit / network),
@@ -440,19 +423,11 @@ function parseUpstreamUrl(url) {
 }
 
 async function ghApi(path) {
-  const headers = {
-    Accept: 'application/vnd.github+json',
-    'User-Agent': UA,
-    'X-GitHub-Api-Version': '2022-11-28',
-  };
-  if (GITHUB_TOKEN) headers.Authorization = `Bearer ${GITHUB_TOKEN}`;
-  if (Date.now() < ghBackoffUntil) throw new Error('GitHub rate limited');
-  const res = await fetch(`https://api.github.com${path}`, { headers });
-  if (!res.ok) {
-    noteRateLimit(res);
-    throw new Error(`HTTP ${res.status}`);
+  try {
+    return await gh.get(path);
+  } catch (e) {
+    throw new Error(e instanceof RateLimitError ? 'GitHub rate limited' : e.status ? `HTTP ${e.status}` : e.message);
   }
-  return res.json();
 }
 
 async function fetchUpstreamOne(parsed) {
@@ -762,7 +737,7 @@ function darkInfo(light) {
     days,
     atLeast,
     label: days == null ? 'dark (since unknown)' : `${atLeast ? '≥ ' : ''}${days} day${days === 1 ? '' : 's'} dark`,
-    lastPassingAt: light.lastPassingAt || null,
+    lastLitAt: light.lastLitAt || light.lastPassingAt || null, // lastPassingAt: lights.json written before light-core
   };
 }
 
@@ -1446,7 +1421,7 @@ function htmlStatusPublic(status) {
           : `<span style="color:#d29922">no fork yet</span>`;
       const install = p.install ? `<pre class="one">${escapeHtml(p.install)}</pre>` : '<small>— (normal npm; nothing rewritten)</small>';
       const days = p.dark
-        ? `<b>${escapeHtml(p.dark.label)}</b>${p.dark.since ? `<br><small>since ${escapeHtml(p.dark.since.slice(0, 10))}${p.dark.lastPassingAt ? ` · last passing ${escapeHtml(p.dark.lastPassingAt.slice(0, 10))}` : ''}</small>` : ''}`
+        ? `<b>${escapeHtml(p.dark.label)}</b>${p.dark.since ? `<br><small>since ${escapeHtml(p.dark.since.slice(0, 10))}${p.dark.lastLitAt ? ` · last lit ${escapeHtml(p.dark.lastLitAt.slice(0, 10))}` : ''}</small>` : ''}`
         : '—';
       const ci = p.light.url ? link(p.light.url, `upstream build: ${p.light.ci}`) : escapeHtml(`upstream build: ${p.light.ci}`);
       return `<tr>
