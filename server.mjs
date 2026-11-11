@@ -317,11 +317,94 @@ function versionManifest(req, npmName, version, tarballRel, extra = {}) {
   };
 }
 
+function requestPathname(req) {
+  const raw = req.url || '/';
+  const q = raw.indexOf('?');
+  return q >= 0 ? raw.slice(0, q) : raw;
+}
+
+/**
+ * Optional registry prefix /only/<pkg,pkg>/ so a project can opt in for
+ * chosen packages only. Parsed from the raw URL so scoped names can use %2F.
+ */
+function parseOnlyRoute(rawPath) {
+  const m = String(rawPath || '').match(/^\/only\/([^/]+)(\/.*)?$/);
+  if (!m) return null;
+  const listSeg = m[1];
+  const names = listSeg
+    .split(',')
+    .map((s) => {
+      try {
+        return decodeURIComponent(s.trim());
+      } catch {
+        return s.trim();
+      }
+    })
+    .filter(Boolean);
+  const restRaw = m[2] || '/';
+  let path;
+  try {
+    path = decodeURIComponent(restRaw);
+  } catch {
+    path = restRaw;
+  }
+  return { path, restRaw, allow: new Set(names), prefix: `/only/${listSeg}` };
+}
+
+function rewriteAllowed(req, npmName) {
+  const allow = req._patchCloudAllow;
+  if (!allow) return true;
+  if (allow.has(npmName)) return true;
+  const lower = String(npmName).toLowerCase();
+  for (const n of allow) {
+    if (String(n).toLowerCase() === lower) return true;
+  }
+  return false;
+}
+
 function baseUrl(req) {
-  if (PUBLIC_URL) return PUBLIC_URL;
-  const proto = (req.headers['x-forwarded-proto'] || 'http').split(',')[0].trim();
-  const host = req.headers.host || `${HOST}:${PORT}`;
-  return `${proto}://${host}`;
+  const root = PUBLIC_URL
+    ? PUBLIC_URL
+    : `${(req.headers['x-forwarded-proto'] || 'http').split(',')[0].trim()}://${req.headers.host || `${HOST}:${PORT}`}`;
+  const prefix = req._patchCloudOnlyPrefix || '';
+  return `${root}${prefix}`;
+}
+
+function headerSafe(s, max = 900) {
+  return String(s)
+    .replace(/[\r\n]+/g, ' ')
+    .replace(/[^\x20-\x7E]/g, ' ')
+    .trim()
+    .slice(0, max);
+}
+
+/** npm prints this header in the install terminal when present. */
+function forkNotice(mapped, { mode, light } = {}) {
+  const pkg = mapped?.npmName || 'package';
+  const forkBits = [mapped?.forkRepo || 'a fitzyracing1 fork', mapped?.forkBranch ? `branch ${mapped.forkBranch}` : null]
+    .filter(Boolean)
+    .join(', ');
+  const run =
+    light?.url && /^https:\/\//.test(light.url)
+      ? light.url
+      : mapped?.ciPatch?.upstreamRun && /^https:\/\//.test(mapped.ciPatch.upstreamRun)
+        ? mapped.ciPatch.upstreamRun
+        : '';
+  const why =
+    mode === 'manual'
+      ? 'a labeled manual switch is on (upstream light is still lit)'
+      : `the upstream ${mapped?.repo || 'package'} CI light is dark${run ? ` - ${run}` : ''}`;
+  return headerSafe(
+    `patch-cloud served unofficial fork ${forkBits} for "${pkg}" because ${why}. Forks are by fitzyracing1, unofficial. Switch back: npm config delete registry  (or set registry=https://registry.npmjs.org/).`,
+  );
+}
+
+function forkServeHeaders(mapped, { mode, light } = {}) {
+  return {
+    'X-Patch-Cloud': mode === 'manual' ? 'manual' : 'fork',
+    'X-Patch-Cloud-Light': mode === 'fork' ? 'dark' : 'lit',
+    'npm-notice': forkNotice(mapped, { mode, light }),
+  };
 }
 
 /** npm tarball filename: scoped packages use unscoped basename. */
@@ -1322,7 +1405,9 @@ function htmlLanding(status) {
   </ul>
 
   <p><small>Active-low lights from greenlight-computer · cache ${status.lightsCacheMinutes} min · service read-only</small></p>
-</main></body></html>`;
+</main>
+${optInUi(reg, ready.map((p) => p.npmName))}
+</body></html>`;
 }
 
 function escapeHtml(s) {
@@ -1331,6 +1416,173 @@ function escapeHtml(s) {
     .replace(/</g, '&lt;')
     .replace(/>/g, '&gt;')
     .replace(/"/g, '&quot;');
+}
+
+/** Shared opt-in modal + reopen button for the landing and /status HTML pages. */
+function optInUi(registry, packagedNames = []) {
+  const reg = String(registry || '').replace(/\/$/, '');
+  const names = [...new Set((packagedNames || []).filter(Boolean))];
+  const official = 'https://registry.npmjs.org';
+  return `
+<style>
+  .pc-optin-reopen{position:fixed;right:1rem;bottom:1rem;z-index:40;border:1px solid #30363d;background:#21262d;color:#e6edf3;border-radius:999px;padding:.45rem .9rem;font:inherit;font-size:.85rem;cursor:pointer;box-shadow:0 4px 16px #0008}
+  .pc-optin-reopen:hover,.pc-optin-reopen:focus{border-color:#58a6ff;outline:none}
+  .pc-optin-overlay{position:fixed;inset:0;z-index:50;background:#0d1117cc;display:flex;align-items:flex-start;justify-content:center;padding:1.5rem 1rem;overflow:auto}
+  .pc-optin-overlay[hidden],.pc-optin-reopen[hidden]{display:none}
+  .pc-optin-dialog{width:min(640px,100%);background:#161b22;color:#e6edf3;border:1px solid #30363d;border-radius:12px;padding:1.25rem 1.35rem 1.4rem;box-shadow:0 12px 40px #000a;margin:1rem 0 3rem;font-family:ui-sans-serif,system-ui,sans-serif;line-height:1.5}
+  .pc-optin-dialog h2{margin:0 1.8rem 0 0;font-size:1.2rem;border:0;padding:0;color:#e6edf3}
+  .pc-optin-dialog p,.pc-optin-dialog li,.pc-optin-dialog label{color:#8b949e}
+  .pc-optin-dialog p{margin:.65rem 0}
+  .pc-optin-close{position:absolute;top:.7rem;right:.7rem;background:transparent;border:0;color:#e6edf3;font-size:1.3rem;cursor:pointer;line-height:1;padding:.25rem .45rem;border-radius:6px}
+  .pc-optin-close:hover,.pc-optin-close:focus{background:#21262d;outline:none}
+  .pc-optin-dialog{position:relative}
+  .pc-optin-options{display:flex;flex-direction:column;gap:.55rem;margin:1rem 0}
+  .pc-optin-option{border:1px solid #30363d;border-radius:8px;padding:.7rem .8rem;background:#0d1117;text-align:left;cursor:pointer;color:inherit;font:inherit}
+  .pc-optin-option:hover{border-color:#58a6ff}
+  .pc-optin-option[aria-pressed="true"]{border-color:#58a6ff;background:#111b2e}
+  .pc-optin-option b{color:#e6edf3;display:block;margin-bottom:.15rem}
+  .pc-optin-setup{background:#0d1117;border:1px solid #30363d;border-radius:8px;padding:.85rem;margin-top:.4rem}
+  .pc-optin-setup h3{margin:.2rem 0 .45rem;font-size:.95rem;color:#e6edf3}
+  .pc-optin-setup pre{background:#21262d;border:1px solid #30363d;border-radius:6px;padding:.7rem .8rem;overflow:auto;color:#e6edf3;font-family:ui-monospace,SFMono-Regular,Menlo,monospace;font-size:.82rem;white-space:pre;word-break:normal}
+  .pc-optin-setup button.copy{margin:.35rem 0 .6rem;background:#21262d;border:1px solid #30363d;color:#e6edf3;border-radius:6px;padding:.2rem .55rem;cursor:pointer;font:inherit;font-size:.8rem}
+  .pc-optin-picks{display:flex;flex-wrap:wrap;gap:.35rem .7rem;margin:.4rem 0 .6rem}
+  .pc-optin-picks label{color:#e6edf3;font-size:.85rem}
+  .pc-optin-setup input[type=text]{width:100%;background:#21262d;border:1px solid #30363d;color:#e6edf3;border-radius:6px;padding:.4rem .5rem;font:inherit}
+  .pc-optin-honest{font-size:.85rem}
+</style>
+<button type="button" id="pc-optin-reopen" class="pc-optin-reopen" hidden>How to use patch-cloud</button>
+<div id="pc-optin-modal" class="pc-optin-overlay" hidden role="dialog" aria-modal="true" aria-labelledby="pc-optin-title">
+  <div class="pc-optin-dialog">
+    <button type="button" class="pc-optin-close" id="pc-optin-close" aria-label="Close">&times;</button>
+    <h2 id="pc-optin-title">What is patch-cloud?</h2>
+    <p>patch-cloud is an <b>opt-in</b> npm registry. If you point npm at it, it will serve a fixed fork under the same package name only while that package's upstream CI light is dark — and, for a few packages, while a clearly labeled “manual: fix available” switch is on. When the upstream light is lit, installs go to the official registry as usual.</p>
+    <p class="pc-optin-honest">The forks are by <b>fitzyracing1</b> and are <b>unofficial</b>. They are not the official npm packages. This registry is never the default; you choose it.</p>
+    <div class="pc-optin-options" role="group" aria-label="How do you want to use it?">
+      <button type="button" class="pc-optin-option" data-opt="auto" aria-pressed="false"><b>Auto</b> Use a fork only while the upstream light is dark. Everything else comes from official npm.</button>
+      <button type="button" class="pc-optin-option" data-opt="pick" aria-pressed="false"><b>Pick packages</b> Only the packages you choose may come from a fork. All others stay on official npm.</button>
+      <button type="button" class="pc-optin-option" data-opt="official" aria-pressed="false"><b>Always official npm</b> Do not use patch-cloud. Every install comes from the public registry.</button>
+    </div>
+    <div id="pc-optin-setup" class="pc-optin-setup" hidden></div>
+    <p style="margin-top:1rem"><button type="button" class="pc-optin-close" id="pc-optin-gotit" style="position:static;font-size:.9rem;border:1px solid #30363d;background:#21262d;padding:.35rem .8rem">Got it</button></p>
+  </div>
+</div>
+<script>
+(function () {
+  var KEY = 'patch-cloud-optin-dismissed';
+  var REG = ${JSON.stringify(reg)};
+  var OFFICIAL = ${JSON.stringify(official)};
+  var NAMES = ${JSON.stringify(names)};
+  var modal = document.getElementById('pc-optin-modal');
+  var reopen = document.getElementById('pc-optin-reopen');
+  var setup = document.getElementById('pc-optin-setup');
+  if (!modal || !reopen || !setup) return;
+  function encodeList(list) {
+    return list.map(function (n) { return encodeURIComponent(n); }).join(',');
+  }
+  function selectedPicks() {
+    var chosen = [];
+    setup.querySelectorAll('[data-pkg]:checked').forEach(function (el) { chosen.push(el.getAttribute('data-pkg')); });
+    var extra = (setup.querySelector('#pc-optin-extra') && setup.querySelector('#pc-optin-extra').value || '')
+      .split(/[\\s,]+/).map(function (s) { return s.trim(); }).filter(Boolean);
+    extra.forEach(function (n) { if (chosen.indexOf(n) < 0) chosen.push(n); });
+    return chosen;
+  }
+  function snippet(text, id) {
+    return '<pre id="' + id + '">' + text.replace(/&/g,'&amp;').replace(/</g,'&lt;') + '</pre>' +
+      '<button type="button" class="copy" data-copy="' + id + '">Copy</button>';
+  }
+  function render(opt) {
+    setup.hidden = false;
+    var html = '';
+    if (opt === 'auto') {
+      html += '<h3>Auto — fork only while the upstream light is dark</h3>';
+      html += '<p>Point this project at patch-cloud. Forks (unofficial, by fitzyracing1) are used only while a packaged package\\'s upstream light is dark, or while a labeled manual switch is on.</p>';
+      html += '<p>One-liner:</p>' + snippet('npm install <pkg> --registry ' + REG, 'pc-snip-auto-cli');
+      html += '<p>Or a project <code>.npmrc</code>:</p>' + snippet('registry=' + REG + '/', 'pc-snip-auto-npmrc');
+      html += '<p>How to undo:</p>' + snippet('npm config delete registry\\n# or remove the registry= line from .npmrc, then install again', 'pc-snip-auto-undo');
+    } else if (opt === 'pick') {
+      html += '<h3>Pick packages — only the ones you choose</h3>';
+      html += '<p>This uses a registry path of the form <code>/only/pkg1,pkg2/</code>. Only those names may be rewritten to a fork; every other package is always official npm. Add or tick the packages you want:</p>';
+      html += '<div class="pc-optin-picks">';
+      NAMES.forEach(function (n) {
+        html += '<label><input type="checkbox" data-pkg="' + String(n).replace(/"/g, '&quot;') + '"> <code>' + String(n).replace(/&/g,'&amp;').replace(/</g,'&lt;') + '</code></label>';
+      });
+      html += '</div>';
+      html += '<p><label>Or type package names (comma-separated)<br><input type="text" id="pc-optin-extra" placeholder="next, react"></label></p>';
+      html += '<div id="pc-optin-pick-snips"></div>';
+    } else if (opt === 'official') {
+      html += '<h3>Always official npm</h3>';
+      html += '<p>Do not point npm at patch-cloud. Use the public registry for everything.</p>';
+      html += '<p>One-liner:</p>' + snippet('npm install <pkg> --registry ' + OFFICIAL, 'pc-snip-off-cli');
+      html += '<p>Or reset your registry:</p>' + snippet('npm config set registry ' + OFFICIAL + '/\\n# or: npm config delete registry', 'pc-snip-off-npmrc');
+      html += '<p>How to undo a previous patch-cloud setup:</p>' + snippet('npm config delete registry\\n# or remove the registry= line from .npmrc, then install again', 'pc-snip-off-undo');
+    }
+    setup.innerHTML = html;
+    if (opt === 'pick') updatePicks();
+    setup.querySelectorAll('button.copy').forEach(bindCopy);
+    var extra = setup.querySelector('#pc-optin-extra');
+    if (extra) extra.addEventListener('input', updatePicks);
+    setup.querySelectorAll('[data-pkg]').forEach(function (el) { el.addEventListener('change', updatePicks); });
+  }
+  function updatePicks() {
+    var box = setup.querySelector('#pc-optin-pick-snips');
+    if (!box) return;
+    var chosen = selectedPicks();
+    var html = '';
+    if (!chosen.length) {
+      html = '<p>Tick or type at least one package name to get a copy-paste setup line.</p>';
+    } else {
+      var url = REG + '/only/' + encodeList(chosen) + '/';
+      html += '<p>One-liner:</p>' + snippet('npm install <pkg> --registry ' + url.replace(/\\/$/, ''), 'pc-snip-pick-cli');
+      html += '<p>Or a project <code>.npmrc</code>:</p>' + snippet('registry=' + url, 'pc-snip-pick-npmrc');
+      html += '<p>How to undo:</p>' + snippet('npm config delete registry\\n# or remove the registry= line from .npmrc, then install again', 'pc-snip-pick-undo');
+    }
+    box.innerHTML = html;
+    box.querySelectorAll('button.copy').forEach(bindCopy);
+  }
+  function bindCopy(btn) {
+    btn.addEventListener('click', function () {
+      var el = document.getElementById(btn.getAttribute('data-copy'));
+      if (!el) return;
+      var text = el.textContent;
+      if (navigator.clipboard && navigator.clipboard.writeText) navigator.clipboard.writeText(text);
+      else {
+        var t = document.createElement('textarea'); t.value = text; document.body.appendChild(t); t.select();
+        try { document.execCommand('copy'); } catch (e) {}
+        document.body.removeChild(t);
+      }
+      btn.textContent = 'Copied';
+      setTimeout(function () { btn.textContent = 'Copy'; }, 1500);
+    });
+  }
+  function openModal() {
+    modal.hidden = false;
+    reopen.hidden = true;
+    var first = modal.querySelector('[data-opt]');
+    if (first) first.focus();
+  }
+  function closeModal() {
+    modal.hidden = true;
+    reopen.hidden = false;
+    try { localStorage.setItem(KEY, '1'); } catch (e) {}
+  }
+  document.querySelectorAll('.pc-optin-option').forEach(function (btn) {
+    btn.addEventListener('click', function () {
+      document.querySelectorAll('.pc-optin-option').forEach(function (b) { b.setAttribute('aria-pressed', b === btn ? 'true' : 'false'); });
+      render(btn.getAttribute('data-opt'));
+    });
+  });
+  document.getElementById('pc-optin-close').addEventListener('click', closeModal);
+  document.getElementById('pc-optin-gotit').addEventListener('click', closeModal);
+  modal.addEventListener('click', function (e) { if (e.target === modal) closeModal(); });
+  document.addEventListener('keydown', function (e) { if (e.key === 'Escape' && !modal.hidden) closeModal(); });
+  reopen.addEventListener('click', openModal);
+  var seen = false;
+  try { seen = localStorage.getItem(KEY) === '1'; } catch (e) {}
+  if (seen) { modal.hidden = true; reopen.hidden = false; }
+  else openModal();
+})();
+</script>`;
 }
 
 function htmlStatusVerbose(status) {
@@ -1543,6 +1795,10 @@ function htmlStatusPublic(status) {
     ${rows}
   </table>
   <p><small>Lights are active-low: lit = upstream build passing, dark = upstream build failing. The manual switch never changes a light. Lights cache ${escapeHtml(status.lightsCacheMinutes)} min.</small></p>
+  ${optInUi(
+    status.registry,
+    status.packages.filter((p) => p.npmName && ['active', 'manual', 'ready'].includes(p.rewrite)).map((p) => p.npmName),
+  )}
   </body></html>`;
 }
 
@@ -1591,13 +1847,23 @@ function resolveTarballRel(mapped, dark) {
 
 const server = http.createServer(async (req, res) => {
   const u = new URL(req.url || '/', `http://${HOST}:${PORT}`);
-  // Keep %2F for matching; decode selectively
-  const pathRaw = u.pathname;
+  // Keep %2F for matching; decode selectively. Use the raw request path so
+  // /only/@scope%2Fname,pkg/... does not get split on a decoded slash.
+  const only = parseOnlyRoute(requestPathname(req));
+  let pathRaw;
   let path;
-  try {
-    path = decodeURIComponent(pathRaw);
-  } catch {
-    path = pathRaw;
+  if (only) {
+    pathRaw = only.restRaw;
+    path = only.path;
+    req._patchCloudAllow = only.allow;
+    req._patchCloudOnlyPrefix = only.prefix;
+  } else {
+    pathRaw = u.pathname;
+    try {
+      path = decodeURIComponent(pathRaw);
+    } catch {
+      path = pathRaw;
+    }
   }
 
   const ip = clientIp(req);
@@ -1673,7 +1939,8 @@ const server = http.createServer(async (req, res) => {
       await ensureLights();
       const lights = loadLightsSync();
       const light = lightFor(mapped.repo, lights);
-      const { mode } = rewriteMode(mapped, light);
+      let { mode } = rewriteMode(mapped, light);
+      if (!rewriteAllowed(req, npmName)) mode = 'none';
       const dark = mode === 'fork';
       const forkFile = `${tarballFileName(npmName, mapped.version || '1.0.0')}`;
       if ((mode === 'fork' || mode === 'manual') && `${tarballMatch[2]}.tgz` !== forkFile && mapped.upstreamProxy) {
@@ -1684,7 +1951,7 @@ const server = http.createServer(async (req, res) => {
         const abs = join(ROOT, mapped.forkTarball || '');
         if (!mapped.forkTarball || !existsSync(abs)) return sendJson(res, 404, { error: 'tarball missing', npmName, manual: true });
         countHit(npmName, 'manual', mapped);
-        return sendFile(res, abs, { 'X-Patch-Cloud': 'manual', 'X-Patch-Cloud-Light': 'lit' });
+        return sendFile(res, abs, forkServeHeaders(mapped, { mode, light }));
       }
       const rel = resolveTarballRel(mapped, dark);
       if (!rel) {
@@ -1696,10 +1963,12 @@ const server = http.createServer(async (req, res) => {
         return sendJson(res, 404, { error: 'tarball missing', npmName, dark });
       }
       countHit(npmName, dark ? 'fork' : 'upstream', mapped);
-      return sendFile(res, abs, {
-        'X-Patch-Cloud': dark ? 'fork' : 'upstream',
-        'X-Patch-Cloud-Light': dark ? 'dark' : 'lit',
-      });
+      return sendFile(res, abs, dark
+        ? forkServeHeaders(mapped, { mode, light })
+        : {
+            'X-Patch-Cloud': 'upstream',
+            'X-Patch-Cloud-Light': 'lit',
+          });
     }
     return proxyNpm(req, res, pathRaw + u.search, { npmName, kind: 'upstream', mapped });
   }
@@ -1718,7 +1987,8 @@ const server = http.createServer(async (req, res) => {
       await ensureLights();
       const lights = loadLightsSync();
       const light = lightFor(mapped.repo, lights);
-      const { mode } = rewriteMode(mapped, light);
+      let { mode } = rewriteMode(mapped, light);
+      if (!rewriteAllowed(req, npmName)) mode = 'none';
       const version = mapped.version || '1.0.0';
 
       if (mode === 'fork' || mode === 'manual') {
@@ -1727,10 +1997,7 @@ const server = http.createServer(async (req, res) => {
         }
         const meta = await rewrittenPackument(req, mapped, mode);
         countHit(npmName, 'metadata', mapped);
-        return sendJson(res, 200, meta, {
-          'X-Patch-Cloud': mode,
-          'X-Patch-Cloud-Light': mode === 'fork' ? 'dark' : 'lit',
-        });
+        return sendJson(res, 200, meta, forkServeHeaders(mapped, { mode, light }));
       }
 
       // lit
@@ -1808,4 +2075,7 @@ export {
   darkStreakOf,
   fetchOneLight,
   watchlistPublic,
+  parseOnlyRoute,
+  forkNotice,
+  rewriteAllowed,
 };

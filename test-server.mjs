@@ -9,6 +9,8 @@
  *  - unmapped left-pad + scoped @types/node → proxied
  *  - PUT rejected (405)
  *  - /health and landing page
+ *  - landing and /status HTML opt-in modal (auto / pick packages / official npm)
+ *  - npm-notice header when a fork is served; /only/<pkg>/ prefix for pick-packages
  *  - /status (JSON + HTML), /health, / leak no box paths ('/workspace', '/home/')
  *  - download counter: fork/upstream/metadata per package, /, /status, /health
  *    not counted, persisted to COUNTS_DIR/downloads.json across restart,
@@ -228,7 +230,22 @@ try {
     const meta = await res.json();
     const ver = JSON.parse(readFileSync(join(ROOT, 'mapping.json'), 'utf8'))['react/react'].version;
     ok('react dark → fork header', res.headers.get('x-patch-cloud') === 'fork', res.headers.get('x-patch-cloud'));
-    ok(`react dark serves ${ver}`, !!meta.versions?.[ver] && meta['dist-tags']?.latest === ver, JSON.stringify(meta['dist-tags']));
+    // The fork version is merged into the upstream packument and upstream dist-tags are kept
+    // (see rewrittenPackument), so `latest` tracks whatever npm says right now — derive it from
+    // upstream instead of pinning a live dist-tag. Only the single-version fallback (upstream
+    // unreachable) sets latest to the fork version.
+    const mergedUpstream = /^upstream/.test(meta._patchCloud?.otherVersions || '');
+    let expectedLatest = ver;
+    if (mergedUpstream) {
+      try {
+        const tags = await (await fetch('https://registry.npmjs.org/-/package/react/dist-tags')).json();
+        expectedLatest = tags.latest;
+      } catch {
+        expectedLatest = null; // npm unreachable from the test: latest must at least be a served version
+      }
+    }
+    const latestOk = expectedLatest ? meta['dist-tags']?.latest === expectedLatest : !!meta.versions?.[meta['dist-tags']?.latest];
+    ok(`react dark serves ${ver}`, !!meta.versions?.[ver] && meta._patchCloud?.replacedVersion === ver && latestOk, `latest=${meta['dist-tags']?.latest} expected=${expectedLatest ?? '(any served version)'}`);
     ok('react dark meta _patchCloud.fork', meta.versions?.[ver]?._patchCloud?.fork === 'fitzyracing1/react' && meta.versions[ver]._patchCloud.branch === 'main');
     const tb = await fetch(meta.versions[ver].dist.tarball);
     ok('react tarball fork header', tb.ok && tb.headers.get('x-patch-cloud') === 'fork', String(tb.status));
@@ -462,6 +479,68 @@ try {
     const dn = st.packages.find((p) => p.repo === 'denoland/deno');
     ok('/status deno issue label', /issue/.test(dn?.upstream?.label || ''), dn?.upstream?.label);
     ok('/status HTML shows fork link', sHtml.includes('https://github.com/fitzyracing1/next.js/tree/rspack-manifest-fix'));
+    const statusKeys = Object.keys(st).sort();
+    ok('/status JSON top-level keys unchanged', statusKeys.join(',') === 'counts,downloads,legend,lightsCacheMinutes,lightsCachedAt,merged,optIn,packages,publicUrl,registry,service,watchlist', statusKeys.join(','));
+  }
+
+  // opt-in modal on human-facing pages
+  {
+    const land = await (await fetch(`${base}/`)).text();
+    const sHtml = await (await fetch(`${base}/status`, { headers: { Accept: 'text/html' } })).text();
+    const visible = (h) => h.replace(/<[^>]+>/g, ' ');
+    for (const [label, html] of [['landing', land], ['/status HTML', sHtml]]) {
+      ok(`${label} has opt-in modal + reopen button`, html.includes('id="pc-optin-modal"') && html.includes('How to use patch-cloud') && html.includes('id="pc-optin-reopen"'));
+      ok(`${label} offers auto, pick packages, and official npm`, html.includes('data-opt="auto"') && html.includes('data-opt="pick"') && html.includes('data-opt="official"'));
+      ok(`${label} copy is honest about unofficial fitzyracing1 forks`, /unofficial/i.test(visible(html)) && html.includes('fitzyracing1'));
+      ok(`${label} shows how to undo`, html.includes('npm config delete registry'));
+      ok(`${label} remembers dismiss in localStorage`, html.includes('patch-cloud-optin-dismissed') && html.includes('localStorage'));
+    }
+    ok('pick-packages setup uses /only/ registry path', land.includes('/only/') && land.includes('encodeURIComponent'));
+    ok('opt-in script keeps regex escapes', land.includes('split(/[\\s,]+/)') && land.includes('url.replace(/\\/$/, \'\')'));
+  }
+
+  // npm-notice when serving a fork; not when proxying or serving upstream
+  {
+    const res = await fetch(`${base}/broken-demo`);
+    const notice = res.headers.get('npm-notice') || '';
+    ok('broken-demo dark metadata has npm-notice', res.headers.get('x-patch-cloud') === 'fork' && /broken-demo/.test(notice) && /unofficial/.test(notice) && /fitzyracing1/.test(notice) && /light is dark/.test(notice) && /npm config delete registry/.test(notice), notice);
+    const meta = await res.json();
+    const tb = await fetch(meta.versions['1.0.0'].dist.tarball);
+    const tbNotice = tb.headers.get('npm-notice') || '';
+    ok('broken-demo dark tarball has npm-notice', tb.ok && tb.headers.get('x-patch-cloud') === 'fork' && /broken-demo/.test(tbNotice) && /unofficial/.test(tbNotice), tbNotice);
+    const prox = await fetch(`${base}/left-pad`);
+    ok('proxied left-pad has no npm-notice', prox.ok && !prox.headers.get('npm-notice'), prox.headers.get('npm-notice'));
+    const dj = await fetch(`${base}/dayjs`);
+    const djNotice = dj.headers.get('npm-notice') || '';
+    ok('dayjs manual metadata has npm-notice', dj.headers.get('x-patch-cloud') === 'manual' && /dayjs/.test(djNotice) && /manual/.test(djNotice) && /unofficial/.test(djNotice), djNotice);
+  }
+
+  // /only/<pkg>/ prefix: rewrite only the chosen names
+  {
+    const allow = await fetch(`${base}/only/broken-demo/broken-demo`);
+    const allowNotice = allow.headers.get('npm-notice') || '';
+    const allowMeta = await allow.json();
+    const tarball = allowMeta.versions?.['1.0.0']?.dist?.tarball || '';
+    ok('/only/broken-demo/ still serves the fork', allow.ok && allow.headers.get('x-patch-cloud') === 'fork' && /broken-demo/.test(allowNotice), allowNotice);
+    ok('/only/ tarball URL stays under the prefix', /\/only\/broken-demo\/broken-demo\/-\//.test(tarball), tarball);
+    const skip = await fetch(`${base}/only/next/broken-demo`);
+    const skipMeta = await skip.json();
+    ok('/only/next/ does not rewrite broken-demo', skip.ok && skip.headers.get('x-patch-cloud') === 'upstream' && !skip.headers.get('npm-notice'), `${skip.headers.get('x-patch-cloud')} notice=${skip.headers.get('npm-notice')}`);
+    ok('/only/next/ broken-demo tarball is the upstream build', !String(skipMeta.versions?.['1.0.0']?.dist?.tarball || '').includes('/only/next/') || skipMeta.versions['1.0.0']._patchCloud?.source === 'upstream', skipMeta.versions?.['1.0.0']?.dist?.tarball);
+    const scoped = await fetch(`${base}/only/@types%2Fnode,broken-demo/broken-demo`);
+    ok('/only/ scoped %2F list still rewrites broken-demo', scoped.ok && scoped.headers.get('x-patch-cloud') === 'fork' && scoped.headers.get('npm-notice'));
+    const ping = await fetch(`${base}/only/broken-demo/-/ping`);
+    const pingJson = await ping.json();
+    ok('/only/<pkg>/-/ping still works', ping.ok && pingJson.ok === true && pingJson.service === 'patch-cloud');
+  }
+
+  {
+    const { parseOnlyRoute, forkNotice } = await import('./server.mjs');
+    const parsed = parseOnlyRoute('/only/@types%2Fnode,next/next');
+    ok('parseOnlyRoute keeps scoped names', parsed && parsed.allow.has('@types/node') && parsed.allow.has('next') && parsed.path === '/next' && parsed.prefix === '/only/@types%2Fnode,next');
+    ok('parseOnlyRoute ignores ordinary paths', parseOnlyRoute('/broken-demo') === null);
+    const n = forkNotice({ npmName: 'next', repo: 'vercel/next.js', forkRepo: 'fitzyracing1/next.js', forkBranch: 'rspack-manifest-fix' }, { mode: 'fork', light: { url: 'https://github.com/vercel/next.js/actions/runs/1' } });
+    ok('forkNotice names fork, branch, run, and undo', /next/.test(n) && /fitzyracing1\/next\.js/.test(n) && /rspack-manifest-fix/.test(n) && /actions\/runs\/1/.test(n) && /unofficial/.test(n) && /npm config delete registry/.test(n), n);
   }
 
   await stop(child);
@@ -479,6 +558,8 @@ try {
     const meta = await res.json();
     const tb = await fetch(meta.versions['1.0.0'].dist.tarball);
     ok('broken-demo lit tarball upstream', tb.ok && tb.headers.get('x-patch-cloud') === 'upstream');
+    ok('broken-demo lit metadata has no npm-notice', !res.headers.get('npm-notice'), res.headers.get('npm-notice'));
+    ok('broken-demo lit tarball has no npm-notice', !tb.headers.get('npm-notice'), tb.headers.get('npm-notice'));
     await tb.arrayBuffer();
     const bd = await pkgDl(base2, 'local/broken-demo');
     ok('lit tarball counted as upstream', bd?.upstream === 1 && bd.fork === forkBefore, JSON.stringify(bd));
