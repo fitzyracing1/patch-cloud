@@ -42,6 +42,9 @@ import {
   UPSTREAM_REFRESH_MINUTES,
   PACKUMENT_CACHE_MINUTES,
 } from './config.mjs';
+
+
+import { buildFeed, feedToAtom, feedToRss } from './feed.mjs';
 import { gunzipSync } from 'node:zlib';
 
 const LOCAL_LIGHTS = join(ROOT, 'local-lights.json');
@@ -516,7 +519,7 @@ async function ensureUpstream() {
 // Per mapped package: tarballs served from the FORK (rewrite active), tarballs
 // served/proxied UPSTREAM, and metadata requests. Unmapped/proxied packages are
 // aggregated under one "other" bucket so the file stays bounded. /, /status,
-// /health are never counted. Persisted to $COUNTS_DIR/downloads.json (debounced)
+// /health, /feed.json, /feed.atom and /feed.rss are never counted. Persisted to $COUNTS_DIR/downloads.json (debounced)
 // when COUNTS_DIR is set and writable; otherwise in-memory since last restart.
 const COUNT_KINDS = ['fork', 'upstream', 'metadata', 'manual'];
 const OTHER_BUCKET = '(other, proxied)';
@@ -646,7 +649,7 @@ function downloadsSummary() {
     total: { ...total, tarballs: total.fork + total.upstream + total.manual },
     last24h: { ...last24h, tarballs: last24h.fork + last24h.upstream + last24h.manual },
     other: downloadsFor(OTHER_BUCKET),
-    counted: 'tarball GETs served from fork (light dark) / manual switch / upstream (incl. proxied) and package metadata GETs; /, /status, /health not counted; no IPs stored',
+    counted: 'tarball GETs served from fork (light dark) / manual switch / upstream (incl. proxied) and package metadata GETs; /, /status, /health, /feed.json, /feed.atom, /feed.rss not counted; no IPs stored',
   };
 }
 
@@ -1031,6 +1034,9 @@ function publicStatusPayload() {
       npmrc: `registry=${reg}/`,
       status: '/status',
       health: '/health',
+      feed: '/feed.json',
+      feedAtom: '/feed.atom',
+      feedRss: '/feed.rss',
     },
   };
 }
@@ -1301,6 +1307,8 @@ function htmlLanding(status) {
     <span class="pill">${manual.length} manual: fix available</span>
     <span class="pill">${ready.length} forks packaged</span>
     <a href="/status">dark lights board</a> ·
+    <a href="/feed.json">/feed.json</a> ·
+    <a href="/feed.atom">/feed.atom</a> ·
     <a href="/health">/health</a>
   </p>
   <table>
@@ -1378,7 +1386,7 @@ function htmlStatusVerbose(status) {
   </style></head><body>
   <h1>patch-cloud status</h1>
   <p>Registry: <code>${escapeHtml(status.registry)}</code> · Lights: <code>${escapeHtml(status.lightsFile)}</code>
-  · <a href="/">landing</a> · <a href="/status">JSON</a> · <a href="/health">/health</a></p>
+  · <a href="/">landing</a> · <a href="/status">JSON</a> · <a href="/feed.json">feed.json</a> · <a href="/feed.atom">feed.atom</a> · <a href="/health">/health</a></p>
   <table>
     <tr><th>Light repo</th><th>npm name</th><th>Light</th><th>Rewrite</th><th>Note</th><th>CI patch</th></tr>
     ${rows}
@@ -1393,7 +1401,7 @@ function downloadsLine(d) {
   const o = d.other || { metadata: 0, upstream: 0 };
   return `<p class="dl"><b>Downloads:</b> ${t.tarballs} tarballs (fork ${t.fork} · upstream ${t.upstream}) · manual switch ${t.manual || 0} · metadata ${t.metadata}
   · last 24h: fork ${d.last24h.fork} · manual ${d.last24h.manual || 0} · upstream ${d.last24h.upstream} · metadata ${d.last24h.metadata}
-  <br><small>${d.persistent ? `since ${escapeHtml(d.since)}` : escapeHtml(d.note)} · unmapped packages (proxied): ${o.upstream} tarballs · ${o.metadata} metadata · all requests counted, incl. our own tests; /, /status, /health excluded; no IPs stored</small></p>`;
+  <br><small>${d.persistent ? `since ${escapeHtml(d.since)}` : escapeHtml(d.note)} · unmapped packages (proxied): ${o.upstream} tarballs · ${o.metadata} metadata · all requests counted, incl. our own tests; /, /status, /health, /feed.json, /feed.atom, /feed.rss excluded; no IPs stored</small></p>`;
 }
 
 function htmlStatusPublic(status) {
@@ -1521,7 +1529,7 @@ function htmlStatusPublic(status) {
   <h1>patch-cloud — dark lights board</h1>
   <p class="muted">A light is <b>dark</b> when the upstream project's latest CI build did not pass, and <b>lit</b> when it passed. A dark light is about the project's own tests, not your install: packages still download normally from npm. Where a fixed fork is packaged, patch-cloud can serve it under the same name if you opt in.</p>
   <p>Registry: <code>${escapeHtml(status.registry)}</code>
-  · <a href="/">landing</a> · <a href="/status?format=json">JSON</a> · <a href="/health">/health</a>${mg ? ' · <a href="#merged">merged fixes</a>' : ''}${wl ? ' · <a href="#watchlist">watchlist</a>' : ''} · <a href="#all">all tracked lights</a></p>
+  · <a href="/">landing</a> · <a href="/status?format=json">JSON</a> · <a href="/feed.json">feed.json</a> · <a href="/feed.atom">feed.atom</a> · <a href="/health">/health</a>${mg ? ' · <a href="#merged">merged fixes</a>' : ''}${wl ? ' · <a href="#watchlist">watchlist</a>' : ''} · <a href="#all">all tracked lights</a></p>
   <p><span class="pill">${status.counts.rewriteActive} fork available (upstream build failing)</span>
   <span class="pill">${status.counts.manual} fork available (manual: fix waiting upstream)</span>
   <span class="pill">${status.counts.ready} fork packaged, upstream OK</span>
@@ -1646,6 +1654,42 @@ const server = http.createServer(async (req, res) => {
       return res.end(STATUS_VERBOSE ? htmlStatusVerbose(status) : htmlStatusPublic(status));
     }
     return sendJson(res, 200, status);
+  }
+
+  async function loadPublicStatus() {
+    try {
+      await ensureLights();
+    } catch {
+      /* ignore */
+    }
+    try {
+      await ensureUpstream();
+    } catch (e) {
+      console.error('upstream state refresh failed (serving cached):', e.message || e);
+    }
+    try {
+      await ensureNpmWeekly();
+    } catch {
+      /* ignore */
+    }
+    return STATUS_VERBOSE ? statusPayloadVerbose() : publicStatusPayload();
+  }
+
+  if (req.method === 'GET' && (path === '/feed.json' || path === '/feed' || path === '/feed.atom' || path === '/feed.rss' || path === '/feed.xml')) {
+    const status = await loadPublicStatus();
+    const feed = buildFeed(status);
+    const accept = req.headers.accept || '';
+    const wantAtom = path === '/feed.atom' || (path === '/feed' && accept.includes('application/atom+xml'));
+    const wantRss = path === '/feed.rss' || path === '/feed.xml' || (path === '/feed' && accept.includes('application/rss+xml'));
+    if (wantAtom) {
+      res.writeHead(200, { 'Content-Type': 'application/atom+xml; charset=utf-8', 'Cache-Control': 'no-store' });
+      return res.end(feedToAtom(feed));
+    }
+    if (wantRss) {
+      res.writeHead(200, { 'Content-Type': 'application/rss+xml; charset=utf-8', 'Cache-Control': 'no-store' });
+      return res.end(feedToRss(feed));
+    }
+    return sendJson(res, 200, feed);
   }
 
   if (req.method === 'GET' && path === '/') {
@@ -1779,6 +1823,7 @@ if (isMain) {
     if (PUBLIC_URL) console.log(`  PUBLIC_URL: ${PUBLIC_URL}`);
     console.log(`  GET /        — landing (opt-in docs)`);
     console.log(`  GET /status  — rewrite board`);
+    console.log(`  GET /feed.json /feed.atom /feed.rss — dark-package feed`);
     console.log(`  GET /health  — liveness`);
     console.log(`  lights: ${LIGHTS_FILE} (cache ${LIGHTS_CACHE_MINUTES}m, refresh=${LIGHTS_REFRESH})`);
     console.log(`  status verbose: ${STATUS_VERBOSE ? 'ON (internal details exposed)' : 'off (public-safe)'}`);
@@ -1791,6 +1836,9 @@ if (isMain) {
 export {
   publicStatusPayload as statusPayload,
   statusPayloadVerbose,
+  buildFeed,
+  feedToAtom,
+  feedToRss,
   publicText,
   downloadsSummary,
   loadLightsSync as loadLights,

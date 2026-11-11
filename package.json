@@ -6,7 +6,7 @@
   "type": "module",
   "scripts": {
     "start": "node server.mjs",
-    "test": "node test-server.mjs",
+    "test": "node test-feed.mjs && node test-server.mjs",
     "flip:dark": "node flip-light.mjs dark",
     "flip:lit": "node flip-light.mjs lit",
     "status": "curl -s http://127.0.0.1:4873/status",

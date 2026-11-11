@@ -9,6 +9,7 @@
  *  - unmapped left-pad + scoped @types/node → proxied
  *  - PUT rejected (405)
  *  - /health and landing page
+ *  - /feed.json + /feed.atom + /feed.rss: dark npm packages and available fixes
  *  - /status (JSON + HTML), /health, / leak no box paths ('/workspace', '/home/')
  *  - download counter: fork/upstream/metadata per package, /, /status, /health
  *    not counted, persisted to COUNTS_DIR/downloads.json across restart,
@@ -137,9 +138,12 @@ try {
     await fetch(`${base}/health`);
     await fetch(`${base}/`);
     await fetch(`${base}/status`, { headers: { Accept: 'text/html' } });
+    await fetch(`${base}/feed.json`);
+    await fetch(`${base}/feed.atom`);
+    await fetch(`${base}/feed.rss`);
     await fetch(`${base}/-/ping`);
     const d1 = await getDl(base);
-    ok('/, /status, /health not counted', d1.total.tarballs === 0 && d1.total.metadata === 0, JSON.stringify(d1.total));
+    ok('/, /status, /health, /feed.json not counted', d1.total.tarballs === 0 && d1.total.metadata === 0, JSON.stringify(d1.total));
     const meta = await (await fetch(`${base}/broken-demo`)).json();
     await (await fetch(meta.versions['1.0.0'].dist.tarball)).arrayBuffer();
     const bd = await pkgDl(base, 'local/broken-demo');
@@ -157,6 +161,44 @@ try {
     const saved = JSON.parse(readFileSync(join(COUNTS_TMP, 'downloads.json'), 'utf8'));
     ok('downloads.json flushed', saved.packages?.['broken-demo']?.fork === 1, JSON.stringify(saved.packages?.['broken-demo']));
     ok('downloads.json has no IPs', !/127\.0\.0\.1|::1|ffff/.test(JSON.stringify(saved)));
+  }
+
+  // public feed (JSON + Atom + RSS)
+  {
+    const res = await fetch(`${base}/feed.json`);
+    ok('/feed.json content-type json', /application\/json/.test(res.headers.get('content-type') || ''));
+    const feed = await res.json();
+    const names = (feed.items || []).map((i) => i.package);
+    ok('/feed.json version and registry', feed.version === 1 && feed.service === 'patch-cloud' && typeof feed.generatedAt === 'string' && typeof feed.registry === 'string');
+    ok('/feed.json has optIn install and optOut', /--registry/.test(feed.optIn?.install || '') && /official npm registry/.test(feed.optIn?.optOut || ''));
+    const nx = feed.items.find((i) => i.package === 'next');
+    ok('/feed.json next core fields', !!(nx && nx.package === 'next' && nx.light === 'dark' && nx.fork?.repo === 'fitzyracing1/next.js' && nx.fork.branch === 'rspack-manifest-fix' && nx.fixAvailable === true && /npm install next@/.test(nx.install || '') && nx.upstreamRepo === 'vercel/next.js'), JSON.stringify(nx));
+    // this server forces react dark, so react belongs in the feed; deno has no npm name
+    ok('/feed.json includes dark react and omits non-npm deno', names.includes('react') && !feed.items.some((i) => i.upstreamRepo === 'denoland/deno'), JSON.stringify(names));
+    const dj = feed.items.find((i) => i.package === 'dayjs');
+    ok('/feed.json includes dayjs (dark or manual)', !!(dj && dj.fixAvailable === true && dj.fork?.repo === 'fitzyracing1/dayjs'), JSON.stringify(dj));
+    const ajv = feed.items.find((i) => i.package === 'ajv');
+    ok('/feed.json includes dark-without-fix ajv', !!(ajv && ajv.light === 'dark' && ajv.fixAvailable === false && ajv.install === null), JSON.stringify(ajv));
+    ok('/feed.json has no /workspace or /home/', !/\/workspace|\/home\//.test(JSON.stringify(feed)));
+
+    const atomRes = await fetch(`${base}/feed.atom`);
+    const atom = await atomRes.text();
+    ok('/feed.atom content-type', /application\/atom\+xml/.test(atomRes.headers.get('content-type') || ''));
+    ok('/feed.atom is xml with next', atom.includes('<?xml') && atom.includes('http://www.w3.org/2005/Atom') && atom.includes('next is dark') && atom.includes('fitzyracing1/next.js'));
+    ok('/feed.atom has no /workspace or /home/', !/\/workspace|\/home\//.test(atom));
+
+    const rssRes = await fetch(`${base}/feed.rss`);
+    const rss = await rssRes.text();
+    ok('/feed.rss content-type', /application\/rss\+xml/.test(rssRes.headers.get('content-type') || ''));
+    ok('/feed.rss is xml with next', rss.includes('<rss version="2.0"') && rss.includes('next is dark') && rss.includes('npm install next@'));
+    ok('/feed.rss has no /workspace or /home/', !/\/workspace|\/home\//.test(rss));
+
+    const feedAccept = await (await fetch(`${base}/feed`, { headers: { Accept: 'application/atom+xml' } })).text();
+    ok('/feed Accept atom', feedAccept.includes('http://www.w3.org/2005/Atom') && feedAccept.includes('next is dark'));
+
+    const landing = await (await fetch(`${base}/`, { headers: { Accept: 'text/html' } })).text();
+    const statusHtml = await (await fetch(`${base}/status`, { headers: { Accept: 'text/html' } })).text();
+    ok('landing and /status link to /feed.json', landing.includes('href="/feed.json"') && statusHtml.includes('href="/feed.json"') && statusHtml.includes('href="/feed.atom"'));
   }
 
   // npm audit POSTs proxied; publish still rejected
@@ -494,6 +536,10 @@ try {
     ok('/status react fork link', rx?.fork?.url === 'https://github.com/fitzyracing1/react' && rx.fork.branch === 'main', JSON.stringify(rx?.fork));
     ok('/status react lit + rewrite ready', rx?.light?.state === 'lit' && rx?.rewrite === 'ready', `${rx?.light?.state}/${rx?.rewrite}`);
     ok('/status react public note', /no code changes yet/i.test(rx?.note || '') && !/\/workspace|\/home\//.test(JSON.stringify(rx)), rx?.note);
+    const feed = await (await fetch(`${base2}/feed.json`)).json();
+    const names = (feed.items || []).map((i) => i.package);
+    ok('/feed.json omits lit react and lit broken-demo', !names.includes('react') && !names.includes('broken-demo'), JSON.stringify(names));
+    ok('/feed.json still includes manual dayjs while lit', !!(feed.items.find((i) => i.package === 'dayjs' && i.light === 'lit' && i.rewrite === 'manual' && i.fixAvailable)), JSON.stringify(feed.items.find((i) => i.package === 'dayjs')));
   }
 
   await stop(child);

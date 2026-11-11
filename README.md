@@ -24,6 +24,18 @@ Nothing is published to the public npm registry by this project. Fork / annotate
 - **Watchlist:** popular packages with dark CI from the npmmirror scan (`watchlist.json`, built by `node build-watchlist.mjs` from `/workspace/mirror/dig.json` + `notes.json`), with repo link, red run, why the build is red, fixability, and "no patch-cloud fork yet". It's a snapshot with day counts as of the scan; it isn't refreshed live.
 - **All tracked lights:** the full table as before.
 
+## Public feed (`/feed.json`, `/feed.atom`, `/feed.rss`)
+
+A machine-readable feed of **dark npm packages** and **available fixes**, generated from the same data as `/status`. It is meant for other tools (including the [patch-cloud GitHub Action](https://github.com/fitzyracing1/patch-cloud-action)) to read.
+
+- `/feed.json` — JSON: `version`, `generatedAt`, `registry`, `optIn` (install line, `.npmrc`, how to opt out), `counts`, and `items[]`. Each item has `package`, `version`, `upstreamRepo`, `light`, `failingRunUrl`, `since`, `daysDark`, `fork` (repo/branch/urls, or `null`), `fixAvailable`, `rewrite`, and `install` (the one-line opt-in command when a fork is being served).
+- `/feed.atom` and `/feed.rss` — the same items as Atom 1.0 and RSS 2.0.
+- `/feed` — JSON by default; send `Accept: application/atom+xml` or `application/rss+xml` to get the matching feed.
+
+Items include every tracked **npm** package whose light is dark, plus packages served via the labeled **manual: fix available** switch (even if the light is lit). Non-npm lights (for example `denoland/deno`) are omitted. Lit packages with a packaged fork that is not being served are omitted.
+
+Live (after deploy): https://patch-cloud-production.up.railway.app/feed.json
+
 JSON (`/status?format=json`) adds `packages[].dark`, `packages[].install`, `packages[].npmWeeklyDownloads`, and a top-level `watchlist`. "Dark" always means the upstream CI didn't pass. Installs from npm still work.
 
 `node seed-lights.mjs` refreshes the bundled `lights.json` (with `darkSince`) before a deploy.
