@@ -11,5 +11,9 @@
     "flip:lit": "node flip-light.mjs lit",
     "status": "curl -s http://127.0.0.1:4873/status",
     "pack:next": "node pack-annotated.mjs next --fork fitzyracing1/next.js --branch rspack-manifest-fix --pr https://github.com/vercel/next.js/pull/100001"
+  },
+  "funding": {
+    "type": "github",
+    "url": "https://github.com/sponsors/fitzyracing1"
   }
 }
