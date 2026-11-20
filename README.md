@@ -12,6 +12,8 @@ npm install <pkg> --registry https://patch-cloud-production.up.railway.app
 
 or for a whole project, add `registry=https://patch-cloud-production.up.railway.app/` to `.npmrc`. Remove it to opt out.
 
+pnpm users can opt in with the [pnpm plugin](packages/pnpm-plugin-patch-cloud) instead (not on npm yet): `pnpm add --config pnpm-plugin-patch-cloud`. It only swaps packages whose light is dark and that have a fork ready, and installs normally if patch-cloud can't be reached.
+
 Not committed here: the ~44 MB annotated `next` tarball (rebuild with `npm run pack:next`) and `local-lights.json` (copy `local-lights.example.json` to force the demo light dark).
 
 Nothing is published to the public npm registry by this project. Fork / annotated tarballs live under `tarballs/`.

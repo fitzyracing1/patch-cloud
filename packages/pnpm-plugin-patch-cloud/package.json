@@ -1,0 +1,23 @@
+{
+  "name": "pnpm-plugin-patch-cloud",
+  "version": "0.1.0",
+  "description": "Opt-in pnpm config dependency: when an upstream CI light is dark and patch-cloud has a fork ready, install the fork tarball instead. Lit packages are untouched.",
+  "license": "MIT",
+  "author": "Joshua Almeida",
+  "homepage": "https://github.com/fitzyracing1/patch-cloud/tree/main/packages/pnpm-plugin-patch-cloud#readme",
+  "repository": {
+    "type": "git",
+    "url": "git+https://github.com/fitzyracing1/patch-cloud.git",
+    "directory": "packages/pnpm-plugin-patch-cloud"
+  },
+  "keywords": ["pnpm", "pnpm-plugin", "pnpmfile", "patch-cloud", "lit-dark"],
+  "main": "pnpmfile.cjs",
+  "files": ["pnpmfile.cjs", "lib.cjs", "README.md", "LICENSE"],
+  "engines": { "node": ">=18" },
+  "scripts": {
+    "test": "node --test test/unit.test.cjs test/e2e.test.mjs",
+    "test:unit": "node --test test/unit.test.cjs",
+    "test:e2e": "node --test test/e2e.test.mjs",
+    "test:live": "PATCH_CLOUD_LIVE=1 node --test test/live.test.mjs"
+  }
+}
